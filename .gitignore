@@ -8,3 +8,5 @@ tests/assets/version_*/*/game/
 *.suo
 *.log
 *.tmp
+/Exporter
+/AsaSavegameToolkit.slnx
