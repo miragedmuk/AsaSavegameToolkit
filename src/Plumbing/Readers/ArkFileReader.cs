@@ -19,6 +19,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                 var prop = ReadProperty(archive);
                 if (prop == null) break;
                 results.Add(prop);
+                lastPropertyName = prop.Name;
             }
             return results;
         }
@@ -56,7 +57,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
                     case "BoolProperty":
                         index = archive.ReadInt32();
-
+                        _ = archive.ReadByte(); // separator
                         break;
                     default:
                         index = archive.ReadInt32();
