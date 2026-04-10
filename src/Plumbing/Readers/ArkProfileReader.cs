@@ -61,7 +61,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
             // Header sequence
             var fileVersion = archive.ReadInt32(); // tribeVersion
-            if (fileVersion < 7) throw new AsaDataException($"Unsupported .arkprofile version: {fileVersion}");
+            if (fileVersion != 7) throw new AsaDataException($"Unsupported .arkprofile version: {fileVersion}");
 
 
             _ = archive.ReadBytes(12); // ID, Save Count, Table Offset

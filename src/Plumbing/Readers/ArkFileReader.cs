@@ -1,6 +1,8 @@
-﻿using AsaSavegameToolkit.Plumbing.Properties;
+﻿using AsaSavegameToolkit.Plumbing.Primitives;
+using AsaSavegameToolkit.Plumbing.Properties;
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,6 +18,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             var results = new List<ArkProperty>();
             while (true)
             {
+                var propStart = archive.Position;
                 var prop = ReadProperty(archive);
                 if (prop == null) break;
                 results.Add(prop);
@@ -40,21 +43,6 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
                 switch (type)
                 {
-                    case "ByteProperty":
-                        index = archive.ReadInt32();
-                        size = archive.ReadInt32();
-                        _ = archive.ReadByte(); // separator
-
-
-                        if (size != 1)
-                        {
-                            archive.Position -= 9;
-                            type = "BoolProperty";
-                        }
-
-
-                        break;
-
                     case "BoolProperty":
                         index = archive.ReadInt32();
                         _ = archive.ReadByte(); // separator
@@ -87,12 +75,34 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                 "BoolProperty" => new ArkProperty<bool> { Name = name, Value = archive.ReadInt32() != 0, Index = index },
                 "FloatProperty" => new ArkProperty<float> { Name = name, Value = archive.ReadFloat(), Index = index },
                 "DoubleProperty" => new ArkProperty<double> { Name = name, Value = archive.ReadDouble(), Index = index },
-                "ByteProperty" => new ArkProperty<byte> { Name = name, Value = archive.ReadByte(), Index = index },
+                "ByteProperty" =>  ReadByteProperty(archive,name,index,size),
                 "ObjectProperty" => ReadObjectProperty(archive, name, index),
                 "ArrayProperty" => ReadArrayProperty(archive, name),
                 "StructProperty" => ReadStructProperty(archive, name),
                 _ => null // Add fallback/logging here if needed
             };
+        }
+
+        private static ArkProperty ReadByteProperty(AsaArchive archive, string name, int index, int size)
+        {
+            if(size== 1)
+            {
+                return new ArkProperty<byte> { Name = name, Value = archive.ReadByte(), Index = index };
+            }
+
+            archive.Position -= 5;
+            var enumType = archive.ReadString();
+            var enumSize = archive.ReadInt32();
+            var enumPath = archive.ReadString();
+
+            var a1 = archive.ReadInt32();
+            var a2 = archive.ReadInt32();
+            _ = archive.ReadByte();
+
+            var enumValue = archive.ReadString();
+
+            return new ArkProperty<string> { Name = name, Value = enumValue, Index = index };
+
         }
 
         private static ArkProperty<string> ReadObjectProperty(AsaArchive archive, string name, int index)
@@ -140,7 +150,15 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
                     return new ArkProperty<(float R, float G, float B, float A)> { Name = name, Value = (r, g, b, a), Index = structIndex };
                 case "IntPoint":
-                    return new ArkProperty<(int X, int Y)> { Name = name, Value = (archive.ReadInt32(), archive.ReadInt32()), Index = structIndex };
+                    var p1 = archive.ReadInt32();
+                    var p2= archive.ReadInt32();
+
+                    return new ArkProperty<string> { Name = name, Value = $"{p1},{p2}", Index = structIndex };
+                case "Vector":
+                    var x = archive.ReadDouble();
+                    var y = archive.ReadDouble();
+                    var z = archive.ReadDouble();
+                    return new ArkProperty<(double X, double Y, double Z)> { Name = name, Value = (x, y, z), Index = structIndex };
             }
 
 
@@ -154,13 +172,17 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             var arrayIndex = archive.ReadInt32();
             var arrayType = archive.ReadString();
 
-            if (arrayType == "StructProperty")
+            switch (arrayType)
             {
-                return ReadStructArray(archive, name, arrayIndex);
+                case "StructProperty":
+                    return ReadStructArray(archive, name, arrayIndex);
             }
 
+
             // Simple Type Arrays (String, UInt, etc)
-            _ = archive.ReadBytes(8);
+            var dataIndex = archive.ReadInt32();
+            var dataSize = archive.ReadInt32();
+
             _ = archive.ReadByte();
             var count = archive.ReadInt32();
 
@@ -209,9 +231,24 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                     Index = arrayIndex,
                     Value = Enumerable.Range(0, count).Select(_ =>
                     {
-                        // Skip the 4-byte index/header if it's there
-                        archive.ReadInt32();
-                        return archive.ReadString();
+                        var objectValue = string.Empty;
+
+                        if (dataSize > 20)
+                        {
+                            archive.ReadBytes(4);
+                            objectValue = archive.ReadString();
+                            // Path reference 
+                            return objectValue;
+                        }
+                        else
+                        {
+                            archive.Position -= 8;
+                           
+                            objectValue = archive.ReadGuid().ToString();
+
+                        }
+
+                        return objectValue;
                     }).ToArray()
                 },
                 _ => null
@@ -224,7 +261,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             _ = archive.ReadInt32(); // unknown
             var structKey = archive.ReadString();
             _ = archive.ReadInt32(); // unknown
-            _ = archive.ReadString(); // structType / path
+            var structPath = archive.ReadString(); // structType / path
             _ = archive.ReadBytes(8); // struct id / padding
             _ = archive.ReadByte(); // separator
 
