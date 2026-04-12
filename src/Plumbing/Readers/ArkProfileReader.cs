@@ -64,11 +64,14 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             if (fileVersion != 7) throw new AsaDataException($"Unsupported .arkprofile version: {fileVersion}");
 
 
-            _ = archive.ReadBytes(12); // ID, Save Count, Table Offset
-            _ = archive.ReadBytes(16); // GUID
+            var gameVersion = archive.ReadInt32();
+            var packageVersion = archive.ReadInt32();
+            var objectDescriptorCount = archive.ReadInt32();
 
-            var fileType = archive.ReadString();
-            _ = archive.ReadInt32(); // Name Table count
+            _ = archive.ReadBytes(16);     
+
+            var classPath = archive.ReadString(); // e.g., "/Game/PrimalEarth/..."
+            var isActor = archive.ReadInt32();    // Usually 0 or 1
 
             var names = archive.ReadStringArray(); // Map Name table strings
             if (names != null && names.Length > 3)
@@ -76,24 +79,11 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                 mapName = names[3]; // Map name
             }
 
-            _ = archive.ReadBytes(12); // padding / unknown
-            _ = archive.ReadByte();
+            _ = archive.ReadBytes(12);            
+            var dataOffset = archive.ReadInt64(); //property start
 
-            var buffCount = archive.ReadInt32(); // Number of "buffs" or similar objects attached to the player. Often 0, but can be 1 or more.
-
-            for (int buffLoop = 0; buffLoop < buffCount; buffLoop++)
-            {
-                var unknown = archive.ReadBytes(19);
-
-                var a = archive.ReadString(); // Buff name
-                var b = archive.ReadInt32(); // instance
-                var c = archive.ReadInt32(); // flags
-                var d = archive.ReadString(); // value
-                archive.ReadBytes(17); // Additional metadata pointers           
-            }
-
-            var unknown2 = archive.ReadInt32();
-
+            archive.Position = dataOffset;
+            _ = archive.ReadByte(); // Property list start marker (0x00)
 
             var properties = ReadProperties(archive);
 

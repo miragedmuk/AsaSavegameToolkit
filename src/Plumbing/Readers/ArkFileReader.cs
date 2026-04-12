@@ -2,6 +2,7 @@
 using AsaSavegameToolkit.Plumbing.Properties;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Text;
@@ -18,11 +19,12 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             var results = new List<ArkProperty>();
             while (true)
             {
+
                 var propStart = archive.Position;
                 var prop = ReadProperty(archive);
                 if (prop == null) break;
                 results.Add(prop);
-                lastPropertyName = prop.Name;
+                lastPropertyName = prop.Name;                
             }
             return results;
         }
@@ -34,7 +36,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
             var type = archive.ReadString();
 
-            // Simple properties share a header; Structs/Arrays handle their own headers
+            // Simple properties share a header; Structs/Arrays handle their own headers, Bools appear to have index and no size.
             int size = 0, index = 0;
 
 
