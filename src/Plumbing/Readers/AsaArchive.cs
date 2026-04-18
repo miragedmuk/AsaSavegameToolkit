@@ -188,7 +188,7 @@ public class AsaArchive : IDisposable
             // UTF-8 string
             if (length > RemainingLength)
             {
-                throw new Exception($"Attempting to read a UTF-8 string of length {length} at position {startPosition} in {FileName}, but only {RemainingLength} bytes remain. This may indicate a corrupted save file.");
+                 throw new Exception($"Attempting to read a UTF-8 string of length {length} at position {startPosition} in {FileName}, but only {RemainingLength} bytes remain. This may indicate a corrupted save file.");
             }
             var utf8Bytes = _reader.ReadBytes(length);
             value = System.Text.Encoding.UTF8.GetString(utf8Bytes, 0, length - 1); // Exclude null terminator

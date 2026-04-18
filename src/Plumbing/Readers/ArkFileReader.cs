@@ -1,5 +1,6 @@
 ﻿using AsaSavegameToolkit.Plumbing.Primitives;
 using AsaSavegameToolkit.Plumbing.Properties;
+using SQLitePCL;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -24,7 +25,9 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                 var prop = ReadProperty(archive);
                 if (prop == null) break;
                 results.Add(prop);
-                lastPropertyName = prop.Name;                
+
+                Debug.WriteLine($"Last Property- Start {propStart}, End - {archive.Position}");
+      
             }
             return results;
         }
@@ -39,6 +42,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             // Simple properties share a header; Structs/Arrays handle their own headers, Bools appear to have index and no size.
             int size = 0, index = 0;
 
+            byte checkByte;
 
             if (type != "StructProperty" && type != "ArrayProperty")
             {
@@ -47,20 +51,19 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                 {
                     case "BoolProperty":
                         index = archive.ReadInt32();
-                        _ = archive.ReadByte(); // separator
+                        checkByte = archive.ReadByte(); // separator
                         break;
+
                     default:
                         index = archive.ReadInt32();
                         size = archive.ReadInt32();
 
-                        _ = archive.ReadByte(); // separator
+                        checkByte = archive.ReadByte(); // separator
                         break;
                 }
 
-                if (name == lastPropertyName)
-                {
+                if (checkByte == 1)
                     index = archive.ReadInt32();
-                }
 
             }
 
@@ -87,13 +90,27 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
         private static ArkProperty ReadByteProperty(AsaArchive archive, string name, int index, int size)
         {
-            if(size== 1)
+            
+            if (size== 1)
             {
-                return new ArkProperty<byte> { Name = name, Value = archive.ReadByte(), Index = index };
+                var currentPos = archive.Position;
+                archive.Position -= 1;
+                var byteType = archive.ReadByte();
+                if(byteType == 0 )  
+                    return new ArkProperty<byte> { Name = name, Value = archive.ReadByte(), Index = index };
+
+                var int1 = archive.ReadInt32();
+                _ = archive.ReadByte();
+                
+                return new ArkProperty<int> { Name = name, Value = int1, Index = index };
+
             }
 
             archive.Position -= 5;
+
             var enumType = archive.ReadString();
+
+
             var enumSize = archive.ReadInt32();
             var enumPath = archive.ReadString();
 
@@ -116,6 +133,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
         private static ArkProperty? ReadStructProperty(AsaArchive archive, string name)
         {
+            var headerStartPos = archive.Position;
             var someInt = archive.ReadInt32();
             var structName = archive.ReadString();
 
@@ -125,8 +143,9 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             var structIndex = archive.ReadInt32();
             var structSizeBytes = archive.ReadInt32();
 
-            _ = archive.ReadByte(); // separator
+            var a1 = archive.ReadByte(); // separator
             var dataStartPos = archive.Position;
+
 
             switch (structName)
             {
@@ -142,9 +161,10 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                     }
                     return null;
                 case "LinearColor":
-                    if (name == lastPropertyName)
+                    if(a1 % 8 != 0)
+                    {
                         structIndex = archive.ReadInt32();
-
+                    }
                     var r = archive.ReadFloat();
                     var g = archive.ReadFloat();
                     var b = archive.ReadFloat();
@@ -164,9 +184,14 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             }
 
 
+            //lastPropertyName = name;
+            if (a1 == 1)
+            {
+                structIndex = archive.ReadInt32();
+            }
             var propertyList = new List<ArkProperty>();
             propertyList = ReadProperties(archive);
-            return new ArkProperty<List<ArkProperty>>() { Name = name, Index = 0, Value = propertyList };
+            return new ArkProperty<List<ArkProperty>>() { Name = name, Index = structIndex, Value = propertyList };
         }
 
         private static ArkProperty? ReadArrayProperty(AsaArchive archive, string name)
@@ -185,8 +210,10 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             var dataIndex = archive.ReadInt32();
             var dataSize = archive.ReadInt32();
 
-            _ = archive.ReadByte();
+            var checkByte = archive.ReadByte();
             var count = archive.ReadInt32();
+
+            var itemDataSize =  (dataSize - 4) / count; 
 
             return arrayType switch
             {
@@ -235,7 +262,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                     {
                         var objectValue = string.Empty;
 
-                        if (dataSize > 20)
+                        if (itemDataSize > 8)
                         {
                             archive.ReadBytes(4);
                             objectValue = archive.ReadString();
@@ -243,11 +270,8 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                             return objectValue;
                         }
                         else
-                        {
-                            archive.Position -= 8;
-                           
-                            objectValue = archive.ReadGuid().ToString();
-
+                        {                           
+                            objectValue = archive.ReadInt64().ToString();
                         }
 
                         return objectValue;
