@@ -73,6 +73,8 @@ public class AsaArchive : IDisposable
 
     public bool IsCryopod { get; internal set; }
 
+    public bool IsArkFile { get; internal set; } 
+
     /// <summary>
     /// Reads a fixed number of bytes.
     /// </summary>
@@ -208,7 +210,7 @@ public class AsaArchive : IDisposable
     /// </summary>
     public FName ReadFName()
     {
-        if (IsCryopod && NameTable.Count == 0)
+        if ((IsCryopod || IsArkFile) && NameTable.Count == 0)
         {
             // Property deserialization requires reading FNames, but cryopods write some of their objects with inline
             // strings. The branch logic is simpler if we just allow for inline FNames

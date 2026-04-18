@@ -1,4 +1,7 @@
 using AsaSavegameToolkit.Plumbing.Primitives;
+using System;
+using System.Drawing;
+using System.Runtime.CompilerServices;
 
 namespace AsaSavegameToolkit.Plumbing.Properties;
 
@@ -84,6 +87,11 @@ public class PropertyTag
     /// </summary>
     public static PropertyTag? Read(Readers.AsaArchive archive)
     {
+        if (archive.IsArkFile)
+        {
+            return ReadArkFile(archive);
+        }
+
         // Early delegation for older versions
         if (archive.SaveVersion < 14)
         {
@@ -142,6 +150,129 @@ public class PropertyTag
         };
     }
     
+
+    private static PropertyTag? ReadArkFile(Readers.AsaArchive archive)
+    {
+        var name = archive.ReadString();
+        if (name == "None")
+        {
+            return null;
+        }
+        var type = archive.ReadString();
+        var index = 0;  
+        var size = 0;
+
+        byte checkByte = 0x0;
+        switch (type)
+        {
+            case "StructProperty":
+                var someInt= archive.ReadInt32();
+                var structName = archive.ReadString();
+
+                var someOtherInt = archive.ReadInt32();
+                var structPath = archive.ReadString();
+
+                _ = archive.ReadBytes(4); //padding?
+                var structSizeBytes = archive.ReadInt32();
+                var arrayMarker = archive.ReadByte();
+
+                switch (structName)
+                {
+                    case "Quat":
+                    case "Vector":
+                    case "Rotator":
+                    case "LinearColor":
+                    case "Color":
+                    case "Vector2D":
+                    case "UniqueNetIdRepl":
+                        if (arrayMarker % 8 != 0)
+                            index = archive.ReadInt32();
+                        break;
+
+                    default:
+                        if (arrayMarker == 1)
+                            index= archive.ReadInt32();
+
+                        break;
+                }
+
+                FPropertyTypeName structType = FPropertyTypeName.Create(new FName(0,0,type), new FName(0, 0, structName));
+
+                return new PropertyTag
+                {
+                    Name = new FName(0, 0, name),
+                    Type = structType,
+                    ArrayIndex = index,
+                    Flags = arrayMarker,
+                    Size = structSizeBytes
+                };
+
+            case "ArrayProperty":
+                var arrayMeta = archive.ReadInt32();
+                var arrayType = archive.ReadString();
+
+                switch (arrayType)
+                {
+                    case "StructProperty":
+                        FPropertyTypeName arrayTypeStruct = FPropertyTypeName.Create(new FName(0, 0, type), new FName(0, 0, arrayType));
+                        return new PropertyTag
+                        {
+                            Name = new FName(0, 0, name),
+                            Type = arrayTypeStruct,
+                            ArrayIndex = index,
+                            Size = 1
+                        };
+
+
+                    default:
+                        _ = archive.ReadBytes(4); //padding
+                        var dataSize = archive.ReadInt32();
+                        var flags = archive.ReadByte();
+
+                        FPropertyTypeName arrayTypeName = FPropertyTypeName.Create(new FName(0, 0, type), new FName(0, 0, arrayType));
+                        return new PropertyTag
+                        {
+                            Name = new FName(0, 0, name),
+                            Type = arrayTypeName,
+                            ArrayIndex = index,
+                            Size = dataSize,
+                            Flags = flags
+                        };
+                }
+;
+
+            case "BoolProperty":
+                index = archive.ReadInt32();
+                checkByte = archive.ReadByte();
+
+                if(archive.ReadInt32() != 0)
+                    checkByte = 0x10;
+
+                break;
+
+            default:
+                index = archive.ReadInt32();
+                size = archive.ReadInt32();
+                checkByte = archive.ReadByte();
+                break;
+        }
+
+        if (checkByte == 1)
+            index = archive.ReadInt32();
+
+        return new PropertyTag
+        {
+            Name = new FName(0,0,name),
+            Type = FPropertyTypeName.Create(new FName(0,0,type)) ,
+            Size = size,
+            ArrayIndex = index,
+            Flags = checkByte
+        };
+
+
+
+    }
+
     /// <summary>
     /// Reads a property tag for save versions 11-13 (legacy format).
     /// Returns null if the property name is "None" (end of property list).

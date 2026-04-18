@@ -1,4 +1,5 @@
-﻿using AsaSavegameToolkit.Plumbing.Records;
+﻿using AsaSavegameToolkit.Plumbing.Properties;
+using AsaSavegameToolkit.Plumbing.Records;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System;
@@ -9,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace AsaSavegameToolkit.Plumbing.Readers
 {
-    public class ArkProfileReader: ArkFileReader
+    public class ArkProfileReader
     {
         private readonly string _saveDirectory;
         private readonly ILogger _logger;
@@ -62,7 +63,9 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             // Header sequence
             var fileVersion = archive.ReadInt32(); // tribeVersion
             if (fileVersion != 7) throw new AsaDataException($"Unsupported .arkprofile version: {fileVersion}");
-
+            
+            archive.SaveVersion = (short)fileVersion; // Set save version for correct parsing
+            archive.IsArkFile = true; // Mark as Ark file for correct handling
 
             var gameVersion = archive.ReadInt32();
             var packageVersion = archive.ReadInt32();
@@ -88,6 +91,19 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             var properties = ReadProperties(archive);
 
             return new ArkFileRecord(timestamp, filePath, mapName, properties);
+        }
+
+        public static List<Property> ReadProperties(AsaArchive archive)
+        {
+
+            var results = new List<Property>();
+            while (true)
+            {
+                var prop = Property.Read(archive);
+                if (prop == null) break;
+                results.Add(prop);
+            }
+            return results;
         }
 
     }

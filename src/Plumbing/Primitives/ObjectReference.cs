@@ -37,6 +37,11 @@ public class ObjectReference
     /// </summary>
     public static ObjectReference Read(Readers.AsaArchive archive)
     {
+        if (archive.IsArkFile)
+        {
+            return ReadFile(archive);
+        }
+        
         if(archive.IsCryopod)
         {
             return ReadCryopod(archive);
@@ -55,6 +60,31 @@ public class ObjectReference
         }
         else
         {
+            // GUID reference (most common)
+            return new ObjectReference
+            {
+                IsPath = false,
+                ObjectId = archive.ReadGuid()
+            };
+        }
+    }
+
+    private static ObjectReference ReadFile(AsaArchive archive)
+    {
+        var referenceType = archive.ReadInt32();
+
+        if (referenceType == 1)
+        {
+            // Path reference (FName)
+            return new ObjectReference
+            {
+                IsPath = true,
+                Path = new FName(0,0, archive.ReadString())
+            };
+        }
+        else
+        {
+            archive.Position -= 4; // Rewind the int32 we just read, as the GUID is stored in the same 4 bytes + 12 more bytes
             // GUID reference (most common)
             return new ObjectReference
             {

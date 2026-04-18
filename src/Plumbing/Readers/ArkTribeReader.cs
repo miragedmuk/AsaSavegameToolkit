@@ -1,4 +1,5 @@
-﻿using AsaSavegameToolkit.Plumbing.Records;
+﻿using AsaSavegameToolkit.Plumbing.Properties;
+using AsaSavegameToolkit.Plumbing.Records;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,7 +14,7 @@ using System.Threading.Tasks;
 
 namespace AsaSavegameToolkit.Plumbing.Readers
 {
-    public class ArkTribeReader: ArkFileReader
+    public class ArkTribeReader
     {
         private readonly string _saveDirectory;
         private readonly ILogger _logger;
@@ -38,7 +39,8 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             var tribeFiles = Directory.EnumerateFiles(_saveDirectory, "*.arktribe");
             var tribeBag = new List<ArkFileRecord>();
             var exceptions = new ConcurrentBag<Exception>();
-            Parallel.ForEach(tribeFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
+            //Parallel.ForEach(tribeFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
+            foreach(var filePath in tribeFiles)
             {
                 try
                 {
@@ -54,7 +56,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                     _logger.LogError(ex, "Failed to read tribe file {FilePath}", filePath);
                 }
             }
-            );
+            //);
             return tribeBag.ToList();
 
 
@@ -70,6 +72,9 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             // Header sequence
             var fileVersion = archive.ReadInt32(); // tribeVersion
             if (fileVersion < 7) throw new AsaDataException($"Unsupported .arktribe version: {fileVersion}");
+            archive.SaveVersion = (short)fileVersion;
+            archive.IsArkFile = true;
+
 
             _ = archive.ReadBytes(12); // ID, Save Count, Table Offset
             _ = archive.ReadBytes(16); // GUID
@@ -92,6 +97,19 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
             return new ArkFileRecord(timestamp, filePath, mapName, properties);
 
+        }
+
+        public static List<Property> ReadProperties(AsaArchive archive)
+        {
+
+            var results = new List<Property>();
+            while (true)
+            {
+                var prop = Property.Read(archive);
+                if (prop == null) break;
+                results.Add(prop);
+            }
+            return results;
         }
     }
 }
