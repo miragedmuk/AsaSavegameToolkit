@@ -2,6 +2,7 @@ using AsaSavegameToolkit.Plumbing.Primitives;
 using AsaSavegameToolkit.Plumbing.Readers;
 using System;
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Xml.Linq;
 
@@ -115,28 +116,38 @@ public class ArrayProperty : Property<IList>
         var elements = new object[count];
 
         // Read each element based on element type
-        var dataTypeSize = (tag.Size - 4) / count; // rough size of each element based on total size in tag (minus 4 bytes for count)
 
         for (int i = 0; i < count; i++)
         {
-            switch (elementType.TypeName.Name)
+            if (archive.IsArkFile)
             {
-                case "ObjectProperty":
-                    if(dataTypeSize > 8)
-                    {
-                        elements[i] = ReadValue(archive, elementType);
-                    }
-                    else
-                    {
-                        elements[i] = archive.ReadInt64();
-                    }
+                switch (elementType.TypeName.Name)
+                {
+                    case "ObjectProperty":
+                        var dataTypeSize = (tag.Size - 4) / count; // rough size of each element based on total size in tag (minus 4 bytes for count)
 
-                    break;
-                default:
-                    elements[i] = ReadValue(archive, elementType);
-                    break;
+                        if (dataTypeSize > 8)
+                        {
+                            elements[i] = ReadValue(archive, elementType);
+                        }
+                        else
+                        {
+                            elements[i] = archive.ReadInt64();
+                        }
+
+                        break;
+                    default:
+                        elements[i] = ReadValue(archive, elementType);
+                        break;
+                }
             }
-            
+            else
+            {
+                elements[i] = ReadValue(archive, elementType);
+            }
+
+
+
         }
         
         return elements;
