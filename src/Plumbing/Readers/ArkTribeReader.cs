@@ -24,8 +24,8 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             ArgumentException.ThrowIfNullOrEmpty(saveDirectory);
 
             if (!Directory.Exists(saveDirectory))
-            {
-                throw new FileNotFoundException("Save path not found", saveDirectory);
+            {               
+                throw new DirectoryNotFoundException($"Save path not found: {saveDirectory}");
             }
 
             _saveDirectory = saveDirectory;
@@ -38,8 +38,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             var tribeFiles = Directory.EnumerateFiles(_saveDirectory, "*.arktribe");
             var tribeBag = new List<ArkFileRecord>();
             var exceptions = new ConcurrentBag<Exception>();
-            //Parallel.ForEach(tribeFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
-            foreach (var filePath in tribeFiles)
+            Parallel.ForEach(tribeFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
             {
                 try
                 {
@@ -55,7 +54,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                     _logger.LogError(ex, "Failed to read tribe file {FilePath}", filePath);
                 }
             }
-            //);
+            );
             return tribeBag.ToList();
 
 
@@ -65,7 +64,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
         {
             string mapName = "Unknown Map";
             var timestamp = File.GetLastWriteTimeUtc(filePath);
-            using var stream = new MemoryStream(File.ReadAllBytes(filePath));
+            using var stream = File.OpenRead(filePath);
             using var archive = new AsaArchive(NullLogger.Instance, stream, filePath);
 
             // Header sequence
@@ -76,7 +75,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             _ = archive.ReadBytes(16); // GUID
 
             var fileType = archive.ReadString();
-            _ = archive.ReadInt32(); // Name Table count
+            _ = archive.ReadInt32(); 
 
             var names = archive.ReadStringArray(); // Map Name table strings
             if (names != null && names.Length > 3)
@@ -85,7 +84,6 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             }
 
             _ = archive.ReadInt32(); // shouldBeZero
-
             _ = archive.ReadBytes(16); // Padding/Struct ID
             _ = archive.ReadBytes(1);  // Separator
 

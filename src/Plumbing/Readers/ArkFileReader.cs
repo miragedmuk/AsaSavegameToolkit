@@ -13,21 +13,14 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 {
     public abstract class ArkFileReader
     {
-        private static string lastPropertyName = string.Empty;
-
         public static List<ArkProperty> ReadProperties(AsaArchive archive)
         {
             var results = new List<ArkProperty>();
             while (true)
             {
-
-                var propStart = archive.Position;
                 var prop = ReadProperty(archive);
                 if (prop == null) break;
                 results.Add(prop);
-
-                Debug.WriteLine($"Last Property- Start {propStart}, End - {archive.Position}");
-      
             }
             return results;
         }
@@ -46,27 +39,23 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
             if (type != "StructProperty" && type != "ArrayProperty")
             {
-
                 switch (type)
                 {
                     case "BoolProperty":
                         index = archive.ReadInt32();
-                        checkByte = archive.ReadByte(); // separator
+                        checkByte = archive.ReadByte(); 
                         break;
 
                     default:
                         index = archive.ReadInt32();
                         size = archive.ReadInt32();
-
-                        checkByte = archive.ReadByte(); // separator
+                        checkByte = archive.ReadByte(); 
                         break;
                 }
 
                 if (checkByte == 1)
                     index = archive.ReadInt32();
-
             }
-
 
             return type switch
             {
@@ -82,8 +71,8 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                 "DoubleProperty" => new ArkProperty<double> { Name = name, Value = archive.ReadDouble(), Index = index },
                 "ByteProperty" =>  ReadByteProperty(archive,name,index,size),
                 "ObjectProperty" => ReadObjectProperty(archive, name, index),
-                "ArrayProperty" => ReadArrayProperty(archive, name),
-                "StructProperty" => ReadStructProperty(archive, name),
+                "ArrayProperty" => ReadArrayProperty(archive, name,index),
+                "StructProperty" => ReadStructProperty(archive, name,index),
                 _ => null // Add fallback/logging here if needed
             };
         }
@@ -131,21 +120,17 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
         }
 
-        private static ArkProperty? ReadStructProperty(AsaArchive archive, string name)
+        private static ArkProperty? ReadStructProperty(AsaArchive archive, string name, int index)
         {
-            var headerStartPos = archive.Position;
             var someInt = archive.ReadInt32();
             var structName = archive.ReadString();
 
             var someOtherInt = archive.ReadInt32();
             var structPath = archive.ReadString();
 
-            var structIndex = archive.ReadInt32();
+            _ = archive.ReadBytes(4); //padding?
             var structSizeBytes = archive.ReadInt32();
-
-            var a1 = archive.ReadByte(); // separator
-            var dataStartPos = archive.Position;
-
+            var arrayMarker = archive.ReadByte();
 
             switch (structName)
             {
@@ -157,57 +142,55 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                         string netIdType = archive.ReadString(); // e.g., "EOS" or "Steam"
                         ulong netId = archive.ReadUInt64();
                         _ = archive.ReadBytes(9);
-                        return new ArkProperty<ulong> { Name = name, Value = netId, Index = 0 };
+                        return new ArkProperty<ulong> { Name = name, Value = netId, Index = index };
                     }
                     return null;
                 case "LinearColor":
-                    if(a1 % 8 != 0)
+                    if(arrayMarker % 8 != 0)
                     {
-                        structIndex = archive.ReadInt32();
+                        index = archive.ReadInt32();
                     }
                     var r = archive.ReadFloat();
                     var g = archive.ReadFloat();
                     var b = archive.ReadFloat();
                     var a = archive.ReadFloat();
 
-                    return new ArkProperty<(float R, float G, float B, float A)> { Name = name, Value = (r, g, b, a), Index = structIndex };
+                    return new ArkProperty<(float R, float G, float B, float A)> { Name = name, Value = (r, g, b, a), Index = index };
                 case "IntPoint":
                     var p1 = archive.ReadInt32();
                     var p2= archive.ReadInt32();
 
-                    return new ArkProperty<string> { Name = name, Value = $"{p1},{p2}", Index = structIndex };
+                    return new ArkProperty<string> { Name = name, Value = $"{p1},{p2}", Index = index };
                 case "Vector":
                     var x = archive.ReadDouble();
                     var y = archive.ReadDouble();
                     var z = archive.ReadDouble();
-                    return new ArkProperty<(double X, double Y, double Z)> { Name = name, Value = (x, y, z), Index = structIndex };
+                    return new ArkProperty<string> { Name = name, Value = $"{x},{y},{z}", Index = index };
             }
 
-
-            //lastPropertyName = name;
-            if (a1 == 1)
+            if (arrayMarker == 1)
             {
-                structIndex = archive.ReadInt32();
+                index = archive.ReadInt32();
             }
             var propertyList = new List<ArkProperty>();
             propertyList = ReadProperties(archive);
-            return new ArkProperty<List<ArkProperty>>() { Name = name, Index = structIndex, Value = propertyList };
+            return new ArkProperty<List<ArkProperty>>() { Name = name, Index = index, Value = propertyList };
         }
 
-        private static ArkProperty? ReadArrayProperty(AsaArchive archive, string name)
+        private static ArkProperty? ReadArrayProperty(AsaArchive archive, string name, int index)
         {
-            var arrayIndex = archive.ReadInt32();
+            var arrayMeta = archive.ReadInt32();
             var arrayType = archive.ReadString();
 
             switch (arrayType)
             {
                 case "StructProperty":
-                    return ReadStructArray(archive, name, arrayIndex);
+                    return ReadStructArray(archive, name, index);
             }
 
 
             // Simple Type Arrays (String, UInt, etc)
-            var dataIndex = archive.ReadInt32();
+            _ = archive.ReadBytes(4); //padding
             var dataSize = archive.ReadInt32();
 
             var checkByte = archive.ReadByte();
@@ -220,44 +203,44 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                 "StrProperty" => new ArkProperty<string[]>
                 {
                     Name = name,
-                    Index = arrayIndex,
+                    Index = index,
                     Value = Enumerable.Range(0, count).Select(_ => archive.ReadString()).ToArray()
                 },
                 "UInt32Property" => new ArkProperty<uint[]>
                 {
                     Name = name,
-                    Index = arrayIndex,
+                    Index = index,
                     Value = Enumerable.Range(0, count).Select(_ => archive.ReadUInt32()).ToArray()
                 },
                 "DoubleProperty" => new ArkProperty<double[]>
                 {
                     Name = name,
-                    Index = arrayIndex,
+                    Index = index,
                     Value = Enumerable.Range(0, count).Select(_ => archive.ReadDouble()).ToArray()
                 },
                 "FloatProperty" => new ArkProperty<float[]>
                 {
                     Name = name,
-                    Index = arrayIndex,
+                    Index = index,
                     Value = Enumerable.Range(0, count).Select(_ => archive.ReadFloat()).ToArray()
                 },
                 "NameProperty" => new ArkProperty<string[]>
                 {
                     Name = name,
-                    Index = arrayIndex,
+                    Index = index,
                     Value = Enumerable.Range(0, count).Select(_ => archive.ReadString()).ToArray()
                 },
                 "ByteProperty" => new ArkProperty<byte[]>
                 {
                     Name = name,
-                    Index = arrayIndex,
+                    Index = index,
                     Value = Enumerable.Range(0, count).Select(_ => archive.ReadByte()).ToArray()
 
                 },
                 "ObjectProperty" => new ArkProperty<string[]>
                 {
                     Name = name,
-                    Index = arrayIndex,
+                    Index = index,
                     Value = Enumerable.Range(0, count).Select(_ =>
                     {
                         var objectValue = string.Empty;

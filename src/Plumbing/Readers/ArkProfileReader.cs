@@ -56,7 +56,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
         {
             string mapName = "Unknown Map";
             var timestamp = File.GetLastWriteTimeUtc(filePath);
-            using var stream = new MemoryStream(File.ReadAllBytes(filePath));
+            using var stream = File.OpenRead(filePath);
             using var archive = new AsaArchive(NullLogger.Instance, stream, filePath);
 
             // Header sequence
