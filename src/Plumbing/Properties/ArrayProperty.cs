@@ -52,10 +52,22 @@ public class ArrayProperty : Property<IList>
         }
 
         // Avoid boxing byte arrays - if element type is byte, read as byte array directly
-        if (elementType.TypeName.FullName == "ByteProperty")
+        if (elementType.TypeName.FullName == "ByteProperty" )
         {
-            var byteArray = archive.ReadBytes(count);
-            return byteArray;
+            if (elementType.ParameterCount == 0)
+            {
+                var byteArray = archive.ReadBytes(count);
+                return byteArray;
+            }
+
+            //enum array
+            var enumElements = new object[count];
+            for (int i = 0; i < count; i++)
+            {
+                enumElements[i] = archive.ReadFName();
+            }
+
+            return enumElements;
         }
 
         var elements = new object[count];

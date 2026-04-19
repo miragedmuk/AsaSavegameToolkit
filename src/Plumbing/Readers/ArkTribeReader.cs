@@ -19,6 +19,8 @@ namespace AsaSavegameToolkit.Plumbing.Readers
         private readonly string _saveDirectory;
         private readonly ILogger _logger;
         private readonly AsaReaderSettings _settings;
+        
+
 
         public ArkTribeReader(string saveDirectory, ILogger? logger = default, AsaReaderSettings? settings = default)
         {
@@ -39,8 +41,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             var tribeFiles = Directory.EnumerateFiles(_saveDirectory, "*.arktribe");
             var tribeBag = new List<ArkFileRecord>();
             var exceptions = new ConcurrentBag<Exception>();
-            //Parallel.ForEach(tribeFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
-            foreach(var filePath in tribeFiles)
+            Parallel.ForEach(tribeFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
             {
                 try
                 {
@@ -56,7 +57,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
                     _logger.LogError(ex, "Failed to read tribe file {FilePath}", filePath);
                 }
             }
-            //);
+            );
             return tribeBag.ToList();
 
 
@@ -71,6 +72,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
             // Header sequence
             var fileVersion = archive.ReadInt32(); // tribeVersion
+            
             if (fileVersion < 7) throw new AsaDataException($"Unsupported .arktribe version: {fileVersion}");
             archive.SaveVersion = (short)fileVersion;
             archive.IsArkFile = true;
@@ -95,7 +97,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             //Properties
             var properties = ReadProperties(archive);
 
-            return new ArkFileRecord(timestamp, filePath, mapName, properties);
+            return new ArkFileRecord(timestamp, filePath, mapName, fileVersion, properties);
 
         }
 

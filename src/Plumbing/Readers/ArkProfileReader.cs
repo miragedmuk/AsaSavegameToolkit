@@ -62,7 +62,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
             // Header sequence
             var fileVersion = archive.ReadInt32(); // tribeVersion
-            if (fileVersion != 7) throw new AsaDataException($"Unsupported .arkprofile version: {fileVersion}");
+            if (fileVersion < 7) throw new AsaDataException($"Unsupported .arkprofile version: {fileVersion}");
             
             archive.SaveVersion = (short)fileVersion; // Set save version for correct parsing
             archive.IsArkFile = true; // Mark as Ark file for correct handling
@@ -90,7 +90,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
             var properties = ReadProperties(archive);
 
-            return new ArkFileRecord(timestamp, filePath, mapName, properties);
+            return new ArkFileRecord(timestamp, filePath, mapName, fileVersion, properties);
         }
 
         public static List<Property> ReadProperties(AsaArchive archive)
