@@ -30,10 +30,10 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             _settings = settings ?? AsaReaderSettings.None;
         }
 
-        public List<ArkFileRecord> Read()
+        public List<GameObjectRecord> Read()
         {
             var profileFiles = Directory.EnumerateFiles(_saveDirectory, "*.arkprofile");
-            var profileBag = new List<ArkFileRecord>();
+            var profileBag = new List<GameObjectRecord>();
             var exceptions = new List<Exception>();
             foreach (var filePath in profileFiles)
             {
@@ -53,7 +53,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             return profileBag.ToList();
         }
 
-        private ArkFileRecord ReadProfileFile(string filePath)
+        private GameObjectRecord ReadProfileFile(string filePath)
         {
             string mapName = "Unknown Map";
             var timestamp = File.GetLastWriteTimeUtc(filePath);
@@ -90,7 +90,10 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
             var properties = ReadProperties(archive);
 
-            return new ArkFileRecord(timestamp, filePath, mapName, fileVersion, properties);
+            ObjectTypeFlags objectType = ObjectTypeFlags.Actor;
+
+            return new GameObjectRecord(Guid.NewGuid(),new Primitives.FName(0,0,classPath),names,properties,0,objectType,default);
+
         }
 
         public static List<Property> ReadProperties(AsaArchive archive)

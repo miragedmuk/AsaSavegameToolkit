@@ -1,13 +1,12 @@
-using System.Collections.Concurrent;
-using System.Threading;
-using System.Threading.Tasks;
-
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
-
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace AsaSavegameToolkit.Plumbing.Readers;
 
@@ -103,7 +102,8 @@ public class AsaSaveReader : IDisposable
     }
 
     private readonly object _gameRecordsLock = new();
-    public IReadOnlyDictionary<Guid, GameObjectRecord> ReadGameRecords(CancellationToken cancellationToken = default)
+
+    public IReadOnlyDictionary<Guid, GameObjectRecord> ReadGameRecords(List<GameObjectRecord> tribes, List<GameObjectRecord> players, CancellationToken cancellationToken = default)
     {
         if (_cachedGameRecords != null)
         {
@@ -171,6 +171,30 @@ public class AsaSaveReader : IDisposable
             // This allows the GC to collect the raw SQL bytes before the result dict is
             // assigned, keeping peak RSS lower on large saves.
             gameRows = null!;
+
+            if(tribes!=null && tribes.Count > 0)
+            {
+                foreach(var tribe in tribes)
+                {
+                    parsedGameRecords.AddOrUpdate(tribe.Uuid, tribe, (_, _) =>
+                    {
+                        _logger.LogWarning("Replacing game object with guid {Guid} from tribe files. This may indicate duplicate entries in the database or a collision. Returning the new object.", tribe.Uuid);
+                        return tribe;
+                    });
+                }
+            }
+
+            if (players!=null && players.Count > 0)
+            {
+                foreach (var player in players)
+                {
+                    parsedGameRecords.AddOrUpdate(player.Uuid, player, (_, _) =>
+                    {
+                        _logger.LogWarning("Replacing game object with guid {Guid} from player files. This may indicate duplicate entries in the database or a collision. Returning the new object.", player.Uuid);
+                        return player;
+                    });
+                }
+            }
 
             // Assign the ConcurrentDictionary directly — ConcurrentDictionary implements
             // IReadOnlyDictionary, so no .ToDictionary() copy is needed.

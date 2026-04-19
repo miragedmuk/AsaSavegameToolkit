@@ -9,6 +9,7 @@ public class Structure
     public Guid Id { get; set; }
     public required string ClassName { get; set; }
     public string? StructureName { get; set; }
+    public long TribeId { get; set; }   
     public string? TribeName { get; set; }
     public bool IsPlayerBuilt { get; set; }
     public FVector? Location { get; private set; }
@@ -23,6 +24,7 @@ public class Structure
             ClassName = r.GetClassName(),
             StructureName = r.Properties.Get<string>("StructureName"),
             TribeName = r.Properties.Get<string>("TribeName"),
+            TribeId = r.Properties.Get<long>("TribeId"),
             IsPlayerBuilt = r.Properties.Get<bool>("bHasResetDecayTime") || GameObjectExtensions.NonCreatureDisambiguatedClasses.Contains(r.GetClassName()),
             Location = transform?.Location,
             Rotation = transform?.Rotation,

@@ -1,6 +1,8 @@
 using AsaSavegameToolkit.Plumbing.Primitives;
+using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
+using System.Diagnostics;
 
 namespace AsaSavegameToolkit.Porcelain;
 
@@ -28,6 +30,10 @@ public class Player
     /// The player's in-game name.
     /// </summary>
     public string? PlayerName { get; set; }
+
+    public string? ChracterName { get; set;  }
+
+    public long Level { get; set; } = 1;
 
     /// <summary>
     /// The tribe ID this player belongs to. 0 if not in a tribe.
@@ -60,20 +66,56 @@ public class Player
     /// <summary>
     /// Creates a new Player instance from a record.
     /// </summary>
-    public static Player Create(GameObjectRecord record, ActorTransform? transform)
+    public static Player Create(GameObjectRecord profileRecord, GameObjectRecord gameRecord, ActorTransform? transform)
     {
-        var player = new Player
+
+
+        var myData = profileRecord.Properties.Get<StructProperty>("MyData").Value as List<Property>;
+        var persistentConfigProperties = myData.Get<StructProperty>("MyPersistentCharacterStats").Value as List<Property>;
+        var persistentStatusProperties = myData.Get<StructProperty>("MyPlayerCharacterConfig").Value as List<Property>;
+        var linkedPlayerDataId = myData.Get<ulong>("PlayerDataID");
+        string characterName = persistentStatusProperties.Get<string>("PlayerCharacterName");
+        int playerLevel = 0;
+
+        if (gameRecord == null)
         {
-            Id = record.Uuid,
-            ClassName = record.GetClassName(),
-            PlayerName = record.Properties.Get<string>("PlayerName"),
-            TribeId = record.Properties.Get<int>("TribeID"),
-            PlayerDataId = record.Properties.TryGet<long>("PlayerDataID", out var value) ? value : null,
+
+            for(int i = 0; i < 12; i++)
+            {
+                playerLevel += persistentStatusProperties.Get<byte>($"CharacterStatusComponent_NumberOfLevelUpPointsApplied",i);
+            }
+               
+            var player = new Player
+            {
+                Id = profileRecord.Uuid,
+                ClassName = profileRecord.ClassName.Name,
+                PlayerName = myData.Get<string>("PlayerName"),
+                ChracterName = characterName,
+                TribeId = (int)linkedPlayerDataId,
+                Level = playerLevel,
+                PlayerDataId = (long)linkedPlayerDataId,
+                Location = transform?.Location,
+                Rotation = transform?.Rotation,
+                Record = profileRecord
+            };
+
+            return player;
+        }
+
+
+        return new Player
+        {
+            Id = gameRecord.Uuid,
+            ClassName = gameRecord.GetClassName(),
+            PlayerName = gameRecord.Properties.Get<string>("PlatformProfileName"),
+            ChracterName = gameRecord.Properties.Get<string>("PlayerName"),
+            TribeId = gameRecord.Properties.Get<int>("TargetingTeam"),
+            Level = gameRecord.GetFullLevel(),
+            PlayerDataId = (long)linkedPlayerDataId,
             Location = transform?.Location,
             Rotation = transform?.Rotation,
-            Record = record
+            Record = profileRecord
         };
 
-        return player;
     }
 }

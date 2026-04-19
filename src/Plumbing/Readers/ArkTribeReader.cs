@@ -19,7 +19,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
         private readonly string _saveDirectory;
         private readonly ILogger _logger;
         private readonly AsaReaderSettings _settings;
-        
+        private bool _disposed;
 
 
         public ArkTribeReader(string saveDirectory, ILogger? logger = default, AsaReaderSettings? settings = default)
@@ -36,10 +36,10 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             _settings = settings ?? AsaReaderSettings.None;
         }
 
-        public List<ArkFileRecord> Read()
+        public List<GameObjectRecord> Read()
         {
             var tribeFiles = Directory.EnumerateFiles(_saveDirectory, "*.arktribe");
-            var tribeBag = new List<ArkFileRecord>();
+            var tribeBag = new List<GameObjectRecord>();
             var exceptions = new ConcurrentBag<Exception>();
             Parallel.ForEach(tribeFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
             {
@@ -63,7 +63,7 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
         }
 
-        private ArkFileRecord? ReadTribeFile(string filePath)
+        private GameObjectRecord? ReadTribeFile(string filePath)
         {
             string mapName = "Unknown Map";
             var timestamp = File.GetLastWriteTimeUtc(filePath);
@@ -96,9 +96,9 @@ namespace AsaSavegameToolkit.Plumbing.Readers
 
             //Properties
             var properties = ReadProperties(archive);
+            ObjectTypeFlags objectType = ObjectTypeFlags.Actor;
 
-            return new ArkFileRecord(timestamp, filePath, mapName, fileVersion, properties);
-
+            return new GameObjectRecord(Guid.NewGuid(), new Primitives.FName(0, 0, fileType), names, properties, 0, objectType, default);
         }
 
         public static List<Property> ReadProperties(AsaArchive archive)
@@ -113,5 +113,6 @@ namespace AsaSavegameToolkit.Plumbing.Readers
             }
             return results;
         }
+
     }
 }

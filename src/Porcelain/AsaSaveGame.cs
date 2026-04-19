@@ -1,5 +1,5 @@
 using System.Threading;
-
+using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Readers;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
@@ -25,27 +25,38 @@ public class AsaSaveGame
     public static AsaSaveGame ReadFrom(string path, ILogger? logger = null, AsaReaderSettings? settings = null, CancellationToken cancellationToken = default)
     {
         logger ??= NullLogger.Instance;
+        
         using var reader = new AsaSaveReader(path, logger, settings ?? AsaReaderSettings.None);
         using var cryoReader = new CryopodReader(logger, settings);
 
+        var tribeReader = new ArkTribeReader(Path.GetDirectoryName(path), logger, settings ?? AsaReaderSettings.None);
+        var tribeData = tribeReader.Read();
+
+        var profileReader = new ArkProfileReader(Path.GetDirectoryName(path), logger, settings ?? AsaReaderSettings.None);
+        var playerData = profileReader.Read();
+
         var header = reader.ReadSaveHeader(cancellationToken);
-        var gameObjects = reader.ReadGameRecords(cancellationToken);
+        var gameObjects = reader.ReadGameRecords(tribeData, playerData, cancellationToken);
         var transforms = reader.ReadActorTransforms(cancellationToken).Transforms;
         var customBytes = reader.ReadGameModeCustomBytes(cancellationToken);
 
         var creatureRecords = new Dictionary<Guid, GameObjectRecord>();
         var droppedItemRecords = new Dictionary<Guid, GameObjectRecord>();
         var inventoryItemRecords = new Dictionary<Guid, GameObjectRecord>();
-        var playerRecords = new Dictionary<Guid, GameObjectRecord>();
+        var playerComponentRecords = new Dictionary<Guid, GameObjectRecord>();
         var structureRecords = new Dictionary<Guid, GameObjectRecord>();
         var deathCacheRecords = new Dictionary<Guid, GameObjectRecord>();
         var ignoredRecords = new Dictionary<Guid, GameObjectRecord>();
         var unknownRecords = new Dictionary<Guid, GameObjectRecord>();
 
-        // First pass: place all top-level objects (those with only 1 name) into the recordsByName dictionary so they
+
+
+
+        // Place all top-level objects (those with only 1 name) into the recordsByName dictionary so they
         // can be referenced as parents by their components in the second pass.
         Dictionary<string, GameObjectRecord> recordsByName = gameObjects.Values
             .Where(x => x.Names.Count == 1)
+            .DistinctBy(x => x.Names[0])
             .ToDictionary(x => x.Names[0]);
 
         // Second pass: for each game object with multiple names, find its parent object in recordsByName using the
@@ -83,8 +94,8 @@ public class AsaSaveGame
         {
             if (gameObject.IsCreature())
                 creatureRecords[gameObject.Uuid] = gameObject;
-            else if (gameObject.IsPlayer())
-                playerRecords[gameObject.Uuid] = gameObject;
+            else if (gameObject.IsPlayerComponent())
+                playerComponentRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsStructure())
                 structureRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsInventoryItem())
@@ -111,13 +122,31 @@ public class AsaSaveGame
             r => r.Key,
             r => Structure.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null));
 
-        var players = playerRecords.ToDictionary(
-            r => r.Key, 
-            r => Player.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null));
+
+
+
+        var players = playerData.ToDictionary(
+            r => r.Uuid, 
+            r => 
+            {
+                ulong playerDataId = 0;
+                var myData = r.Properties.Get<StructProperty>("MyData");
+                if (myData != null)
+                {
+                    List<Property> properties = (List<Property>)myData.Value;
+                    playerDataId = properties.Get<ulong>("PlayerDataID");
+                }
+                var playerComponents = playerComponentRecords.Values.FirstOrDefault(v => v.Properties.Get<ulong>("LinkedPlayerDataID") == playerDataId);
+                var playerId = playerComponents?.Uuid??Guid.Empty;
+
+                return Player.Create(r, playerComponents, transforms.TryGetValue(playerId, out var t) ? t : null);
+            });
 
         var creatures = creatureRecords.ToDictionary(
             r => r.Key,
-            r => Creature.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null));
+            r => Creature.Create(r.Value,transforms.TryGetValue(r.Key, out var t) ? t : null));
+
+
 
         var droppedItems = droppedItemRecords.ToDictionary(
             r => r.Key,
@@ -209,6 +238,7 @@ public class AsaSaveGame
             }
         }
 
+        
         return new AsaSaveGame
         {
             SaveVersion = header.SaveVersion,

@@ -74,7 +74,7 @@ public static class GameObjectExtensions
         return gameObject.Properties.HasAny("bInitializedMe");
     }
 
-    public static bool IsPlayer(this GameObjectRecord gameObject)
+    public static bool IsPlayerComponent(this GameObjectRecord gameObject)
     {
         return gameObject.Properties.HasAny("LinkedPlayerDataID");
     }
@@ -178,12 +178,27 @@ public static class GameObjectExtensions
 
         if(!statusComponent.Properties.TryGet<int>("BaseCharacterLevel", out var baseLevel))
         {
-            baseLevel = 1;
+            baseLevel = 0;
         }
 
         int extraLevel = statusComponent.Properties.Get<short>("ExtraCharacterLevel");
+        int wildLevels = GetStatValues<byte>(statusComponent, "NumberOfLevelUpPointsApplied", 12).Sum(x=>x.GetValueOrDefault(0));
+        int tamedLevels = GetStatValues<byte>(statusComponent, "NumberOfLevelUpPointsAppliedTamed", 12).Sum(x=>x.GetValueOrDefault(0));
+        int tamedMutations = GetStatValues<byte>(statusComponent, "NumberOfMutationsAppliedTamed", 12).Sum(x => x.GetValueOrDefault(0));
+        return baseLevel + extraLevel + wildLevels + tamedLevels + tamedMutations + 1;
+    }
 
-        return baseLevel + extraLevel;
+    public static T?[] GetStatValues<T>(this GameObjectRecord statusComponent, string propertyName, int count) where T : struct
+    {
+        var levels = new T?[count];
+        for (var i = 0; i < count; i++)
+        {
+            if (statusComponent.Properties.TryGet<T>(propertyName, i, out var level))
+            {
+                levels[i] = level;
+            }
+        }
+        return levels;
     }
 
     public static string? GetNameForCreature(this GameObjectRecord gameObject, ArkDataProvider arkData, string valueIfNotFound = "")

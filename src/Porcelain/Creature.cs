@@ -159,13 +159,13 @@ public class Creature
     /// <summary>
     /// Creates a new Creature instance from a record and transform.
     /// </summary>
-    public static Creature Create(GameObjectRecord record, ActorTransform? transform)
+    public static Creature Create(GameObjectRecord actor, ActorTransform? transform)
     {
-        var properties = record.Properties;
+        var properties = actor.Properties;
 
         var mutationsMale = properties.Get<int>("RandomMutationsMale");
         var mutationsFemale = properties.Get<int>("RandomMutationsFemale");
-        var baseLevel = record.GetBaseLevel();
+        var baseLevel = actor.GetBaseLevel();
         var extraCharacterLevel = properties.Get<int>("ExtraCharacterLevel");
         var colorRegions = new byte?[12];
         if (properties.TryGet<IList>("ColorSetIndices", out var arrayElements))
@@ -179,16 +179,16 @@ public class Creature
 
         var creature = new Creature
         {
-            Id = record.Uuid,
-            ClassName = record.GetClassName(),
+            Id = actor.Uuid,
+            ClassName = actor.GetClassName(),
             TamedName = properties.Get<string>("TamedName"),
             TribeName = properties.Get<string>("TribeName"),
             TamerString = properties.Get<string>("TamerString"),
-            IsTamed = record.IsTamed(),
+            IsTamed = actor.IsTamed(),
             IsFemale = properties.Get<bool>("bIsFemale"),
             BaseLevel = baseLevel,
             ExtraLevel = extraCharacterLevel,
-            TotalLevel = baseLevel is int b ? b + extraCharacterLevel : null,
+            TotalLevel = actor.GetFullLevel(),
             MutationsMale = mutationsMale,
             MutationsFemale = mutationsFemale,
             TotalMutations = mutationsMale + mutationsFemale,
@@ -202,10 +202,10 @@ public class Creature
             ColorRegions = colorRegions,
             Location = transform?.Location,
             Rotation = transform?.Rotation,
-            Record = record
+            Record = actor
         };
 
-        var statusComponent = record.GetCharacterStatusComponent();
+        var statusComponent = actor.GetCharacterStatusComponent();
         if (statusComponent != null)
         {
             creature.IngestStatusRecord(statusComponent);
@@ -234,6 +234,7 @@ public class Creature
 
     internal void IngestStatusRecord(GameObjectRecord statusComponent)
     {
+
         WildLevels = GetStatValues<byte>(statusComponent, "NumberOfLevelUpPointsApplied", 12);
         TamedLevelsApplied = GetStatValues<byte>(statusComponent, "NumberOfLevelUpPointsAppliedTamed", 12);
         MutationLevelsApplied =GetStatValues<byte>(statusComponent, "NumberOfMutationsAppliedTamed", 12);

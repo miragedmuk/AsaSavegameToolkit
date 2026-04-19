@@ -142,14 +142,15 @@ public sealed class CryopodReader : IDisposable
                 try
                 {
                     cryoObjects = ParseCryoBlob(cryoPod, blob, index, cancellationToken);
+                    results.Add(cryoObjects);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to parse cryo blob for pod {PodName} ({PodUuid})", cryoPod.Name, cryoPod.Uuid);
-                    throw new AsaDataException($"Failed to parse cryo blob for pod {cryoPod.Name} ({cryoPod.Uuid})", ex);
+                    //throw new AsaDataException($"Failed to parse cryo blob for pod {cryoPod.Name} ({cryoPod.Uuid})", ex);
                 }
 
-                results.Add(cryoObjects);
+                
             }
         }
 
