@@ -189,11 +189,6 @@ public static class GameObjectExtensions
         
         var totalLevel = wildLevels + tamedLevels + tamedMutations + 1;
 
-        if (totalLevel > 150)
-        {
-
-
-        }
         return totalLevel; 
 
 

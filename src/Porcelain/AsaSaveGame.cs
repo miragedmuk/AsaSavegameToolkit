@@ -116,14 +116,14 @@ public class AsaSaveGame
         gameObjects = null!;
         recordsByName = null!;
 
-        var tribes = new Dictionary<Guid, Tribe>();
+        var tribes = tribeData.ToDictionary(
+                r => r.Uuid,
+                r => new Tribe(r)
+            );
 
         var structures = structureRecords.ToDictionary(
             r => r.Key,
             r => Structure.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null));
-
-
-
 
         var players = playerData.ToDictionary(
             r => r.Uuid, 
@@ -249,6 +249,6 @@ public class AsaSaveGame
             CryopoddedCreatures = cryopoddedCreatures,
             Structures = structures,
             DroppedItems = droppedItems,
-        };
+        }; 
     }
 }

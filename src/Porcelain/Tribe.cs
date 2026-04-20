@@ -1,3 +1,4 @@
+using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
 
@@ -31,17 +32,20 @@ public class Tribe
     /// <summary>
     /// The tribe's display name.
     /// </summary>
-    public string? TribeName => Record.Properties.Get<string>("TribeName");
+    public string? TribeName => (Record.Properties.Get<StructProperty>("TribeData").Value as List<Property>).Get<string>("TribeName");
 
     /// <summary>
     /// The numeric tribe ID.
     /// </summary>
-    public int TribeId => Record.Properties.Get<int>("TribeID");
+    public int TribeId => (Record.Properties.Get<StructProperty>("TribeData").Value as List<Property>).Get<int>("TribeID");
 
     /// <summary>
     /// Owner player data ID (tribe founder/owner).
     /// </summary>
-    public long? OwnerPlayerDataId => Record.Properties.TryGet<long>("OwnerPlayerDataID", out var value) ? value : null;
+    public long? OwnerPlayerDataId => (Record.Properties.Get<StructProperty>("TribeData").Value as List<Property>).Get<uint>("OwnerPlayerDataId");
+
+
+
 
     public override string ToString() => TribeName ?? Record.GetClassName();
 }

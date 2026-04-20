@@ -23,9 +23,9 @@ public class Structure
             Id = r.Uuid,
             ClassName = r.GetClassName(),
             StructureName = r.Properties.Get<string>("StructureName"),
-            TribeName = r.Properties.Get<string>("TribeName"),
-            TribeId = r.Properties.Get<long>("TribeId"),
-            IsPlayerBuilt = r.Properties.Get<bool>("bHasResetDecayTime") || GameObjectExtensions.NonCreatureDisambiguatedClasses.Contains(r.GetClassName()),
+            TribeName = r.Properties.Get<string>("OwnerName"),
+            TribeId = r.Properties.Get<int>("TargetingTeam"),
+            IsPlayerBuilt = (r.Properties.Get<bool>("bHasResetDecayTime") || GameObjectExtensions.NonCreatureDisambiguatedClasses.Contains(r.GetClassName())) && r.Properties.Get<int>("TargetingTeam") !=0,
             Location = transform?.Location,
             Rotation = transform?.Rotation,
             Record = r
