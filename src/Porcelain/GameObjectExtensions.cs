@@ -176,16 +176,27 @@ public static class GameObjectExtensions
             return 1;
         }
 
+        /*
         if(!statusComponent.Properties.TryGet<int>("BaseCharacterLevel", out var baseLevel))
         {
             baseLevel = 0;
         }
+        */
 
-        int extraLevel = statusComponent.Properties.Get<short>("ExtraCharacterLevel");
         int wildLevels = GetStatValues<byte>(statusComponent, "NumberOfLevelUpPointsApplied", 12).Sum(x=>x.GetValueOrDefault(0));
         int tamedLevels = GetStatValues<byte>(statusComponent, "NumberOfLevelUpPointsAppliedTamed", 12).Sum(x=>x.GetValueOrDefault(0));
         int tamedMutations = GetStatValues<byte>(statusComponent, "NumberOfMutationsAppliedTamed", 12).Sum(x => x.GetValueOrDefault(0));
-        return baseLevel + extraLevel + wildLevels + tamedLevels + tamedMutations + 1;
+        
+        var totalLevel = wildLevels + tamedLevels + tamedMutations + 1;
+
+        if (totalLevel > 150)
+        {
+
+
+        }
+        return totalLevel; 
+
+
     }
 
     public static T?[] GetStatValues<T>(this GameObjectRecord statusComponent, string propertyName, int count) where T : struct
