@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO.Compression;
 using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 using System.Threading;
 using System.Xml;
 
@@ -9,7 +10,7 @@ using AsaSavegameToolkit.Plumbing.Primitives;
 using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
-
+using AsaSavegameToolkit.Porcelain;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -37,6 +38,7 @@ public sealed class CryopodReader : IDisposable
 {
     private readonly ILogger _logger;
     private readonly AsaReaderSettings _settings;
+
 
     // Known name constants used by cryo payloads (matches Java implementation)
     private static readonly ReadOnlyDictionary<int, string> NameConstants = new(
@@ -131,7 +133,7 @@ public sealed class CryopodReader : IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var blob = customItemData.CustomDataBytes[index];
-                if (blob.Length == 0)
+                if (blob.Length < 8)
                 {
                     continue; // skip empty blobs
                 }
@@ -162,6 +164,7 @@ public sealed class CryopodReader : IDisposable
     /// </summary>
     private GameObjectRecord[] ParseCryoBlob(GameObjectRecord cryoPod, byte[] bytes, int index, CancellationToken cancellationToken)
     {
+        var results = new List<GameObjectRecord>();
         var version = BitConverter.ToInt32(bytes, 0);
         if (version == 0x01BEDEAD) // observed in v14 cryos; version is actually at offset 4, with a preceding magic value
         {
@@ -187,129 +190,184 @@ public sealed class CryopodReader : IDisposable
         {
             DumpDebugBytes(Path.ChangeExtension(binName, ".compressed.bin"), bytes);
             (payloadBytes, namesOffset) = DecompressBytes(bytes);
+
+
+
+            using var archive = new AsaArchive(_logger, payloadBytes, $"{cryoPod.Uuid}[{index}]")
+            {
+                SaveVersion = 14,
+                AllowDynamicNameTable = dataStore,
+                IsCryopod = true
+            };
+
+            if (namesOffset != null)
+            {
+                // Build name table from payload (offset table + known constants)
+                archive.NameTable = ReadNameTable(archive, namesOffset.Value);
+            }
+
+            // Now parse object metadata manually (BinaryReader) to avoid alignment issues
+
+
+            var metaObjects = new List<CryoObjectMeta>();
+            if (dataStore)
+            {
+                // data stores have 2 unknown ints to skip
+                archive.Position = 8;
+
+                // only dataStore blobs contain multiple objects
+                var objectCount = archive.ReadInt32();
+
+                for (var i = 0; i < objectCount; i++)
+                {
+                    metaObjects.Add(ReadCryoObjectMeta(archive));
+                }
+            }
+            else
+            {
+                // individual blobs have their version header to skip (magic + version) + 2 unknown ints
+
+                // For individual blobs, we only have one object with no metadata.
+                // We add a placeholder meta with the default property offset after the header.
+                metaObjects.Add(new CryoObjectMeta { PropertiesOffset = 16 });
+            }
+
+            // Now read properties for each object via stored offsets using AsaArchive for property decoding
+            foreach (var meta in metaObjects)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Construct FName for class (blueprint path string)
+                var classFName = new FName(-1, 0, meta.Blueprint ?? "Unknown");
+
+                // Prepare properties
+                var props = new List<Property>();
+
+                if (meta.PropertiesOffset <= 0 || meta.PropertiesOffset >= archive.Length)
+                {
+                    _logger.LogWarning("Skipping properties for {Uuid} due to invalid offset {Offset} (archiveLen={Len})", meta.Uuid, meta.PropertiesOffset, archive.Length);
+                    continue;
+                }
+
+                var posBackup = archive.Position;
+                archive.Position = meta.PropertiesOffset;
+
+                // There should be a zero byte to skip.
+                if (archive.Position < archive.Length)
+                {
+                    var maybeZero = archive.ReadByte();
+                    if (maybeZero != 0)
+                    {
+                        // if it wasn't zero, step back so it can be read as part of the first property tag
+                        archive.Position -= 1;
+                    }
+                }
+
+                while (archive.Position < archive.Length)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var prePos = archive.Position;
+                    var property = Property.Read(archive);
+
+                    // Guard against an infinite loop: if the parser returned without
+                    // advancing the position (e.g. tag.Size == 0 for an unrecognized
+                    // property type), we can't make progress — stop reading this object.
+                    if (property == null || archive.Position <= prePos)
+                    {
+                        break; // end-of-properties sentinel ("None")
+                    }
+
+                    props.Add(property);
+                }
+
+                // After properties, an extra int is present (unknown); optional extra GUID
+                if (archive.Position + sizeof(int) <= archive.Length)
+                {
+                    _ = archive.ReadInt32();
+                }
+
+                archive.Position = posBackup;
+
+                var objectId = props.Any(p => p.Tag.Name.ToString() == "bServerInitializedDino") ? meta.Uuid : Guid.NewGuid(); //re-assign uniqueid for non-dinos
+
+                var gameObject = new GameObjectRecord(
+                    objectId,
+                    classFName,
+                    meta.Names,
+                    props,
+                    meta.DataFileIndex,
+                    ObjectTypeFlags.None,
+                    extraGuids: []
+                );
+
+                // If orientation was present, inject as synthetic property so downstream can use transforms if desired
+                if (meta.Rotation.HasValue)
+                {
+                    gameObject.Properties.Add(CreateSyntheticStructProperty("CryoStoredRotation", meta.Rotation.Value));
+
+                }
+
+                if (gameObject.IsCreature())
+                    gameObject.Properties.Add(CreateSyntheticBoolProperty("IsStored", true));
+
+                results.Add(gameObject);
+            }
+
+
+
+            var dinoComponent = results.FirstOrDefault(r => r.IsCreature());
+            if (dinoComponent != null)
+            {
+                var statusComponent = results.FirstOrDefault(r => r.IsStatusComponent());
+                if (statusComponent != null)
+                {
+                    //re-assign status component guid to match dino so they can be linked later (pre-v14 blobs don't have explicit links between components)
+                    var statusReferenceProperty = dinoComponent.Properties.First(p => p.Tag.Name.ToString() == "MyCharacterStatusComponent");
+                    if (statusReferenceProperty != null)
+                    {
+                        var newStatusReference = new ObjectReference()
+                        {
+                            IsPath = false,
+                            ObjectId = statusComponent.Uuid
+                        };
+                        var newProperty = new ObjectProperty() { Tag = statusReferenceProperty.Tag, Value = newStatusReference };
+                        dinoComponent.Properties.Remove(statusReferenceProperty);
+                        dinoComponent.Properties.Add(newProperty);
+
+                    }
+                }
+            }
         }
         else
         {
             // For uncompressed blobs (saddle/costume), skip decompression and treat the blob after the header as the final payload directly.
             payloadBytes = bytes;
-        }
+            DumpDebugBytes(Path.ChangeExtension(binName, "raw.bin"), bytes);
 
-        DumpDebugBytes(binName, payloadBytes);
 
-        using var memoryStream = new MemoryStream(payloadBytes);
-        using var archive = new AsaArchive(_logger, memoryStream, $"{cryoPod.Uuid}[{index}]")
-        {
-            SaveVersion = 14,
-            AllowDynamicNameTable = dataStore,
-            IsCryopod = true
-        };
-
-        if (namesOffset != null)
-        {
-            // Build name table from payload (offset table + known constants)
-            archive.NameTable = ReadNameTable(archive, namesOffset.Value);
-        }
-
-        // Now parse object metadata manually (BinaryReader) to avoid alignment issues
-        var results = new List<GameObjectRecord>();
-
-        var metaObjects = new List<CryoObjectMeta>();
-        if (dataStore)
-        {
-            // data stores have 2 unknown ints to skip
-            archive.Position = 8;
-
-            // only dataStore blobs contain multiple objects
-            var objectCount = archive.ReadInt32();
-
-            for (var i = 0; i < objectCount; i++)
+            if (payloadBytes.Length > 48)
             {
-                metaObjects.Add(ReadCryoObjectMeta(archive));
-            }
-        }
-        else
-        {
-            // individual blobs have their version header to skip (magic + version) + 2 unknown ints
-
-            // For individual blobs, we only have one object with no metadata.
-            // We add a placeholder meta with the default property offset after the header.
-            metaObjects.Add(new CryoObjectMeta { PropertiesOffset = 16 });
-        }
-
-        // Now read properties for each object via stored offsets using AsaArchive for property decoding
-        foreach (var meta in metaObjects)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            // Construct FName for class (blueprint path string)
-            var classFName = new FName(-1, 0, meta.Blueprint ?? "Unknown");
-
-            // Prepare properties
-            var props = new List<Property>();
-
-            if (meta.PropertiesOffset <= 0 || meta.PropertiesOffset >= archive.Length)
-            {
-                _logger.LogWarning("Skipping properties for {Uuid} due to invalid offset {Offset} (archiveLen={Len})", meta.Uuid, meta.PropertiesOffset, archive.Length);
-                continue;
-            }
-
-            var posBackup = archive.Position;
-            archive.Position = meta.PropertiesOffset;
-
-            // There should be a zero byte to skip.
-            if (archive.Position < archive.Length)
-            {
-                var maybeZero = archive.ReadByte();
-                if (maybeZero != 0)
+                var testArchive = new AsaArchive(_logger, payloadBytes, $"{cryoPod.Uuid}[{index}]")
                 {
-                    // if it wasn't zero, step back so it can be read as part of the first property tag
-                    archive.Position -= 1;
-                }
+                    SaveVersion = (short)version,
+                    AllowDynamicNameTable = true,
+                    IsArkFile  = true
+                };
+
+                var archiveType = testArchive.ReadInt32();
+                var archiveVersion = testArchive.ReadInt32();
+                var archiveIndex = testArchive.ReadInt32();
+                var archiveSize = testArchive.ReadInt32();
+
+                var props = Property.ReadList(testArchive);
             }
 
-            while (archive.Position < archive.Length)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var prePos = archive.Position;
-                var property = Property.Read(archive);
 
-                // Guard against an infinite loop: if the parser returned without
-                // advancing the position (e.g. tag.Size == 0 for an unrecognized
-                // property type), we can't make progress — stop reading this object.
-                if (property == null || archive.Position <= prePos)
-                {
-                    break; // end-of-properties sentinel ("None")
-                }
 
-                props.Add(property);
-            }
-
-            // After properties, an extra int is present (unknown); optional extra GUID
-            if (archive.Position + sizeof(int) <= archive.Length)
-            {
-                _ = archive.ReadInt32();
-            }
-
-            archive.Position = posBackup;
-
-            var gameObject = new GameObjectRecord(
-                meta.Uuid,
-                classFName,
-                meta.Names,
-                props,
-                meta.DataFileIndex,
-                ObjectTypeFlags.None,
-                extraGuids: []
-            );
-
-            // If orientation was present, inject as synthetic property so downstream can use transforms if desired
-            if (meta.Rotation.HasValue)
-            {
-                gameObject.Properties.Add(CreateSyntheticStructProperty("CryoStoredRotation", meta.Rotation.Value));
-            }
-
-            results.Add(gameObject);
         }
+
+        
+        
 
         return [.. results];
     }
@@ -319,6 +377,9 @@ public sealed class CryopodReader : IDisposable
         var cryopodId = cryoPod.Uuid.ToString();
         var binName = $"game/{cryopodId[0]}/{cryopodId[1]}/{cryopodId[2]}/{cryopodId}[{index}].cryo.bin";
 
+        // Now parse object metadata manually (BinaryReader) to avoid alignment issues
+        var results = new List<GameObjectRecord>();
+
         byte[] payloadBytes;
         int? namesOffset = null;
 
@@ -326,115 +387,152 @@ public sealed class CryopodReader : IDisposable
         {
             DumpDebugBytes(Path.ChangeExtension(binName, ".compressed.bin"), bytes);
             (payloadBytes, namesOffset) = DecompressBytes(bytes);
+
+            DumpDebugBytes(binName, payloadBytes);
+
+
+            using var archive = new AsaArchive(_logger, payloadBytes, $"{cryoPod.Uuid}[{index}]")
+            {
+                SaveVersion = 13,
+                AllowDynamicNameTable = dataStore,
+                IsCryopod = true
+            };
+
+            if (namesOffset != null)
+            {
+                // Build name table from payload (offset table + known constants)
+                archive.NameTable = ReadNameTable(archive, namesOffset.Value);
+            }
+
+
+            List<CryoObjectMeta> metaObjects = [];
+            if (dataStore)
+            {
+                archive.Position = 0;
+
+                // only data stores contains multiple objects
+                var objectCount = archive.ReadInt32();
+
+                for (var i = 0; i < objectCount; i++)
+                {
+                    metaObjects.Add(ReadCryoObjectMeta(archive));
+                }
+            }
+
+            // Now read properties for each object via stored offsets using AsaArchive for property decoding
+            foreach (var meta in metaObjects)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                // Construct FName for class (blueprint path string)
+                var classFName = new FName(-1, 0, meta.Blueprint ?? "Unknown");
+
+                // Prepare properties
+                var props = new List<Property>();
+
+                if (meta.PropertiesOffset <= 0 || meta.PropertiesOffset >= archive.Length)
+                {
+                    _logger.LogWarning("Skipping properties for {Uuid} due to invalid offset {Offset} (archiveLen={Len})", meta.Uuid, meta.PropertiesOffset, archive.Length);
+                    continue;
+                }
+
+                var posBackup = archive.Position;
+                archive.Position = meta.PropertiesOffset;
+
+                while (archive.Position < archive.Length)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var prePos = archive.Position;
+                    var property = Property.Read(archive);
+
+                    // Guard against an infinite loop: if the parser returned without
+                    // advancing the position (e.g. tag.Size == 0 for an unrecognized
+                    // property type), we can't make progress — stop reading this object.
+                    if (property == null || archive.Position <= prePos)
+                    {
+                        break; // end-of-properties sentinel ("None")
+
+                    }
+
+                    props.Add(property);
+                }
+
+                // After properties, an extra int is present (unknown); optional extra GUID
+                if (archive.Position + sizeof(int) <= archive.Length)
+                {
+                    _ = archive.ReadInt32();
+                }
+
+                archive.Position = posBackup;
+
+                var objectId = props.Any(p => p.Tag.Name.ToString() == "bServerInitializedDino") ? meta.Uuid : Guid.NewGuid(); //re-assign uniqueid for non-dinos
+
+
+                var gameObject = new GameObjectRecord(
+                    objectId,
+                    classFName,
+                    meta.Names,
+                    props,
+                    meta.DataFileIndex,
+                    ObjectTypeFlags.None,
+                    extraGuids: []
+                );
+
+                // If orientation was present, inject as synthetic property so downstream can use transforms if desired
+                if (meta.Rotation.HasValue)
+                {
+                    gameObject.Properties.Add(CreateSyntheticStructProperty("CryoStoredRotation", meta.Rotation.Value));
+                }
+
+                if (gameObject.IsCreature())
+                {
+                    gameObject.Properties.Add(CreateSyntheticBoolProperty("IsStored", true));
+                }
+
+
+                results.Add(gameObject);
+            }
+
+            var dinoComponent = results.FirstOrDefault(r => r.IsCreature());
+            if (dinoComponent != null)
+            {
+                var statusComponent = results.FirstOrDefault(r => r.IsStatusComponent());
+                if (statusComponent != null)
+                {
+                    //re-assign status component guid to match dino so they can be linked later (pre-v14 blobs don't have explicit links between components)
+                    var statusReferenceProperty = dinoComponent.Properties.FirstOrDefault(p => p.Tag.Name.ToString() == "MyCharacterStatusComponent" && p is ObjectProperty) as ObjectProperty;
+                    if (statusReferenceProperty != null)
+                    {
+                        statusReferenceProperty.Value = new ObjectReference()
+                        {
+                            IsPath = false,
+                            ObjectId = statusComponent.Uuid
+                        };
+                    }
+                }
+            }
         }
         else
         {
             // For uncompressed blobs (saddle/costume), skip decompression and treat the blob after the header as the final payload directly.
             payloadBytes = bytes;
-        }
 
-        DumpDebugBytes(binName, payloadBytes);
+            DumpDebugBytes(binName, payloadBytes);
 
-        using var memoryStream = new MemoryStream(payloadBytes);
-        using var archive = new AsaArchive(_logger, memoryStream, $"{cryoPod.Uuid}[{index}]")
-        {
-            SaveVersion = 13,
-            AllowDynamicNameTable = dataStore,
-            IsCryopod = true
-        };
-
-        if (namesOffset != null)
-        {
-            // Build name table from payload (offset table + known constants)
-            archive.NameTable = ReadNameTable(archive, namesOffset.Value);
-        }
-
-        // Now parse object metadata manually (BinaryReader) to avoid alignment issues
-        var results = new List<GameObjectRecord>();
-
-        List<CryoObjectMeta> metaObjects = [];
-        if (dataStore)
-        {
-            archive.Position = 0;
-
-            // only data stores contains multiple objects
-            var objectCount = archive.ReadInt32();
-
-            for (var i = 0; i < objectCount; i++)
+            if (payloadBytes.Length >= 40)
             {
-                metaObjects.Add(ReadCryoObjectMeta(archive));
-            }
-        }
-        else
-        {
-            // For individual blobs, we only have one object with no metadata.
-            // We add a placeholder meta with the default property offset after the int32 version header.
-            metaObjects.Add(new CryoObjectMeta { PropertiesOffset = 4 });
-        }
-
-        // Now read properties for each object via stored offsets using AsaArchive for property decoding
-        foreach (var meta in metaObjects)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            // Construct FName for class (blueprint path string)
-            var classFName = new FName(-1, 0, meta.Blueprint ?? "Unknown");
-
-            // Prepare properties
-            var props = new List<Property>();
-
-            if (meta.PropertiesOffset <= 0 || meta.PropertiesOffset >= archive.Length)
-            {
-                _logger.LogWarning("Skipping properties for {Uuid} due to invalid offset {Offset} (archiveLen={Len})", meta.Uuid, meta.PropertiesOffset, archive.Length);
-                continue;
-            }
-
-            var posBackup = archive.Position;
-            archive.Position = meta.PropertiesOffset;
-
-            while (archive.Position < archive.Length)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var prePos = archive.Position;
-                var property = Property.Read(archive);
-
-                // Guard against an infinite loop: if the parser returned without
-                // advancing the position (e.g. tag.Size == 0 for an unrecognized
-                // property type), we can't make progress — stop reading this object.
-                if (property == null || archive.Position <= prePos)
+                var testArchive = new AsaArchive(_logger, payloadBytes, $"{cryoPod.Uuid}[{index}]")
                 {
-                    break; // end-of-properties sentinel ("None")
+                    SaveVersion = (short)version,
+                    AllowDynamicNameTable = false,
+                    IsCryopod = true
+                };
 
-                }
+                var testProp = Property.Read(testArchive);
 
-                props.Add(property);
             }
 
-            // After properties, an extra int is present (unknown); optional extra GUID
-            if (archive.Position + sizeof(int) <= archive.Length)
-            {
-                _ = archive.ReadInt32();
-            }
-
-            archive.Position = posBackup;
-
-            var gameObject = new GameObjectRecord(
-                meta.Uuid,
-                classFName,
-                meta.Names,
-                props,
-                meta.DataFileIndex,
-                ObjectTypeFlags.None,
-                extraGuids: []
-            );
-
-            // If orientation was present, inject as synthetic property so downstream can use transforms if desired
-            if (meta.Rotation.HasValue)
-            {
-                gameObject.Properties.Add(CreateSyntheticStructProperty("CryoStoredRotation", meta.Rotation.Value));
-            }
-
-            results.Add(gameObject);
         }
+
 
         return [.. results];
     }
@@ -566,6 +664,23 @@ public sealed class CryopodReader : IDisposable
         {
             Tag = tag,
             Value = rotation
+        };
+    }
+
+    private static BoolProperty CreateSyntheticBoolProperty(string name, bool value)
+    {
+        var tag = new PropertyTag
+        {
+            Name = new FName(-1, 0, name),
+            Type = FPropertyTypeName.Create(new FName(-1, 0, "BoolProperty")),
+            Size = 0,
+            ArrayIndex = 0,
+            Flags = 0
+        };
+        return new BoolProperty
+        {
+            Tag = tag,
+            Value = value
         };
     }
 

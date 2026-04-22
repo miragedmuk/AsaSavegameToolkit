@@ -43,7 +43,7 @@ public static class GameObjectExtensions
     public static bool IsStructure(this GameObjectRecord gameObject)
     {
         var className = GetClassName(gameObject);
-        return  className != "Structure_LoadoutDummy_Hotbar_C"
+        return className != "Structure_LoadoutDummy_Hotbar_C"
                 //&& !gameObject.IsInCryo
                 && (
                     gameObject.Properties.HasAny("OwnerName")
@@ -51,6 +51,16 @@ public static class GameObjectExtensions
                     || NonCreatureDisambiguatedClasses.Contains(className)
                 )
                 && !className.StartsWith("DeathItemCache_");
+    }
+
+    public static bool IsTribe(this GameObjectRecord gameObject)
+    {
+        return gameObject.ClassName == "/Script/ShooterGame.PrimalTribeData";
+    }
+
+    public static bool IsProfile(this GameObjectRecord gameObject)
+    {
+        return gameObject.Properties.HasAny("MyData");
     }
 
     public static bool IsCreature(this GameObjectRecord gameObject)
@@ -76,7 +86,7 @@ public static class GameObjectExtensions
 
     public static bool IsPlayerComponent(this GameObjectRecord gameObject)
     {
-        return gameObject.Properties.HasAny("LinkedPlayerDataID");
+        return gameObject.Properties.HasAny("LinkedPlayerDataID") || gameObject.Properties.HasAny("PlayerDataID");
     }
 
     public static bool IsStatusComponent(this GameObjectRecord gameObject)

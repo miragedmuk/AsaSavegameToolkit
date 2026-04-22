@@ -1,10 +1,15 @@
+using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
+using AsaSavegameToolkit.Porcelain;
+using CommunityToolkit.HighPerformance.Buffers;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,9 +32,6 @@ public class AsaSaveReader : IDisposable
     // an extra .ToDictionary() copy, halving peak allocation during ReadGameRecords().
     private IReadOnlyDictionary<Guid, GameObjectRecord>? _cachedGameRecords;
 
-    // Shared string pool for FString deduplication across parallel archives.
-    // Lives exactly as long as this reader; released in Dispose().
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _stringPool = new();
 
     public AsaSaveReader(string saveFile, ILogger? logger = default, AsaReaderSettings? settings = default)
     {
@@ -103,7 +105,7 @@ public class AsaSaveReader : IDisposable
 
     private readonly object _gameRecordsLock = new();
 
-    public IReadOnlyDictionary<Guid, GameObjectRecord> ReadGameRecords(List<GameObjectRecord> tribes, List<GameObjectRecord> players, CancellationToken cancellationToken = default)
+    public IReadOnlyDictionary<Guid, GameObjectRecord> ReadGameRecords(CancellationToken cancellationToken = default)
     {
         if (_cachedGameRecords != null)
         {
@@ -146,6 +148,7 @@ public class AsaSaveReader : IDisposable
 
             var parsedGameRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
 
+
             Parallel.ForEach(gameRows, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, gameRow =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -172,29 +175,120 @@ public class AsaSaveReader : IDisposable
             // assigned, keeping peak RSS lower on large saves.
             gameRows = null!;
 
-            if(tribes!=null && tribes.Count > 0)
+            if (_settings.ReadCryoObjects)
             {
-                foreach(var tribe in tribes)
+                using CryopodReader cryoReader = new CryopodReader(_logger, _settings);
+                foreach (var cryopod in parsedGameRecords.Values.Where(r => r.HasCryoCreature()))
                 {
-                    parsedGameRecords.AddOrUpdate(tribe.Uuid, tribe, (_, _) =>
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var cryoRecordSets = cryoReader.ReadCryopodData(cryopod, cancellationToken).ToList();
+
+                    // Cryopod records allow for multiple CustomItemDatas entries, each one should probably be processed as a
+                    // single dino. Still, warn if we see anything other that 1 set
+
+                    if (cryoRecordSets.Count == 0)
                     {
-                        _logger.LogWarning("Replacing game object with guid {Guid} from tribe files. This may indicate duplicate entries in the database or a collision. Returning the new object.", tribe.Uuid);
-                        return tribe;
-                    });
+                        _logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} does not contain any creature data", cryopod.Names[0], cryopod.Uuid);
+                        continue;
+                    }
+
+                    if (cryoRecordSets.Count > 1)
+                    {
+                        _logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} contains more than on set of creature data", cryopod.Names[0], cryopod.Uuid);
+                    }
+
+                    // Nest status components under their parent dino so Creature.Create() can read stat levels.
+                    // Normally, a creature's equipped saddle still appears in its inventory with an IsEquipped property set.
+                    // In the cryopod, there is no inventory component and the saddle is in its own record. To make them more
+                    // like normal creatures, we'll wrap the saddle in an inventory component and attach that to the creature.
+
+                    foreach (var cryoRecords in cryoRecordSets)
+                    {
+                        var dinoRecords = cryoRecords.Where(r => r.IsCreature()).ToArray();
+                        if (dinoRecords.Length > 1)
+                        {
+                            _logger.LogWarning("Cryopod parsing returned more than one dino object");
+                        }
+
+                        var dinoRecord = dinoRecords.FirstOrDefault();
+                        if (dinoRecord == null)
+                        {
+                            _logger.LogWarning("Cryopod parsing returned no dino records");
+                            continue;
+                        }
+
+                        //var cryoCreature = Creature.Create(dinoRecord, null);
+
+                        if (cryoRecords.Length > 1)
+                        {
+                            // process the DinoCharacterStatusComponent record
+                            //cryoCreature.IngestStatusRecord(cryoRecords[1]);
+                        }
+
+                        if (cryoRecords.Length > 2)
+                        {
+                            // process the costume record
+                            //cryoCreature.IngestCostumeRecord(cryoRecords[2]);
+                        }
+
+                        if (cryoRecords.Length > 3)
+                        {
+                            // process the saddle record
+                            //var saddleObject = Item.FromCryoSaddle(cryoRecords[3]);
+                        }
+
+                        foreach(var cryoObject in cryoRecords)
+                        {
+                            parsedGameRecords.AddOrUpdate(cryoObject.Uuid, cryoObject, (_, _) =>
+                            {
+                                _logger.LogWarning("Replacing game object with guid {Guid} from cryopod parsing. This may indicate duplicate entries in the database or a collision. Returning the new object.", cryoObject.Uuid);
+                                return cryoObject;
+                            });
+                        }
+                    }
                 }
             }
 
-            if (players!=null && players.Count > 0)
+            if (_settings.ReadArkTribeFiles)
             {
-                foreach (var player in players)
+                using ArkTribeReader tribeReader = new ArkTribeReader(_logger,_settings);
+                var tribeObjects = tribeReader.Read(_saveDirectory, cancellationToken);
+
+                Parallel.ForEach(tribeObjects, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, tribeGameObject =>
                 {
-                    parsedGameRecords.AddOrUpdate(player.Uuid, player, (_, _) =>
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    parsedGameRecords.AddOrUpdate(tribeGameObject.Uuid, tribeGameObject, (_, _) =>
                     {
-                        _logger.LogWarning("Replacing game object with guid {Guid} from player files. This may indicate duplicate entries in the database or a collision. Returning the new object.", player.Uuid);
-                        return player;
+                        _logger.LogWarning("Replacing game object with guid {Guid} from tribe files. This may indicate duplicate entries in the database or a collision. Returning the new object.", tribeGameObject.Uuid);
+                        return tribeGameObject;
                     });
                 }
+                );
             }
+
+            if (_settings.ReadArkProfileFiles)
+            {
+                using ArkProfileReader profileReader = new ArkProfileReader(_logger, _settings);
+                var profileObjects = profileReader.Read(_saveDirectory, cancellationToken);
+
+                Parallel.ForEach(profileObjects, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, profileGameObject =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    parsedGameRecords.AddOrUpdate(profileGameObject.Uuid, profileGameObject, (_, _) =>
+                    {
+                        _logger.LogWarning("Replacing game object with guid {Guid} from profile files. This may indicate duplicate entries in the database or a collision. Returning the new object.", profileGameObject.Uuid);
+                        return profileGameObject;
+                    });
+                }
+                );
+            }
+
+            StringPool.Shared.Reset();
+
+            if (!_settings.UseCache)
+                return parsedGameRecords;
 
             // Assign the ConcurrentDictionary directly — ConcurrentDictionary implements
             // IReadOnlyDictionary, so no .ToDictionary() copy is needed.
@@ -244,110 +338,21 @@ public class AsaSaveReader : IDisposable
         File.WriteAllBytes(fullPath, data);
     }
 
+
+
     private GameObjectRecord ParseGameRecord(Guid objectId, byte[] objectData, SaveHeaderRecord saveHeader)
     {
-        var stream = new MemoryStream(objectData);
         // Use just the GUID as the filename — the full save path is the same for every record
         // and concatenating it 100k+ times creates unnecessary unique string allocations.
-        using var archive = new AsaArchive(_logger, stream, _saveFile)
+        using var archive = new AsaArchive(_logger, objectData, _saveFile)
         {
             NameTable = saveHeader.NameTable,
-            SaveVersion = saveHeader.SaveVersion,
-            StringPool = _stringPool,
+            SaveVersion = saveHeader.SaveVersion
         };
 
         return GameObjectRecord.Read(archive, objectId);
     }
 
-    //private void AddTribeFiles(AsaSaveGame saveGame)
-    //{
-    //    var debugSettings = GetDerivedReaderSettings("tribes");
-    //    var tribeFiles = Directory.EnumerateFiles(_saveDirectory, "*.arktribe");
-
-    //    var tribeBag = new ConcurrentBag<TribeFile>();
-    //    var exceptions = new ConcurrentBag<Exception>();
-
-    //    Parallel.ForEach(tribeFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
-    //    {
-    //        try
-    //        {
-    //            using var stream = new MemoryStream(File.ReadAllBytes(filePath));
-    //            using var archive = new AsaArchive(_logger, stream, filePath)
-    //            {
-    //                NameTable = NameTable,
-    //                SaveVersion = SaveVersion
-    //            };
-
-    //            var parsed = TribeFile.Read(archive, filePath, usePropertiesOffset: true);
-
-    //            tribeBag.Add(parsed);
-
-    //            if (debugSettings.HasOutput)
-    //            {
-    //                var outputPath = Path.Join(debugSettings.OutputDirectory, Path.GetFileName(filePath));
-    //                File.Copy(filePath, outputPath, overwrite: true);
-    //                DebugOutput.WriteSerializedJson(Path.ChangeExtension(outputPath, ".json"), parsed);
-    //            }
-    //        }
-    //        catch (Exception ex)
-    //        {
-    //            _logger.LogError(ex, "Failed to read tribe file {FilePath}", filePath);
-    //            exceptions.Add(ex);
-    //        }
-    //    });
-
-    //    saveGame.TribeFiles.AddRange(tribeBag);
-
-    //    if (!exceptions.IsEmpty)
-    //    {
-    //        throw new AggregateException("Failed to read one or more tribe files", exceptions);
-    //    }
-    //}
-
-    //private void AddProfileFiles(AsaSaveGame saveGame)
-    //{
-    //    var debugSettings = GetDerivedReaderSettings("profiles");
-    //    var profileFiles = Directory.EnumerateFiles(_saveDirectory, "*.arkprofile");
-
-    //    var parsedFiles = new ConcurrentBag<ProfileFile>();
-    //    var exceptions = new ConcurrentBag<Exception>();
-
-    //    Parallel.ForEach(profileFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
-    //    {
-    //        try
-    //        {
-    //            using var stream = new MemoryStream(File.ReadAllBytes(filePath));
-    //            using var archive = new AsaArchive(_logger, stream, filePath)
-    //            {
-    //                NameTable = NameTable,
-    //                SaveVersion = SaveVersion
-    //            };
-
-    //            var parsed = ProfileFile.Read(archive, filePath);
-
-    //            parsedFiles.Add(parsed);
-
-    //            if (debugSettings.HasOutput)
-    //            {
-    //                var outputPath = Path.Join(debugSettings.OutputDirectory, Path.GetFileName(filePath));
-    //                File.Copy(filePath, outputPath, overwrite: true);
-    //                DebugOutput.WriteSerializedJson(Path.ChangeExtension(outputPath, ".json"), parsed);
-    //            }
-    //        }
-    //        catch (Exception ex)
-    //        {
-    //            _logger.LogError(ex, "Failed to read profile file {FilePath}", filePath);
-    //            exceptions.Add(ex);
-    //        }
-    //    });
-
-    //    saveGame.ProfileFiles.AddRange(parsedFiles);
-
-    //    if (!exceptions.IsEmpty)
-    //    {
-    //        throw new AggregateException("Failed to read one or more profile files", exceptions);
-    //    }
-    //}
 
     private T ProcessCustomTableRow<T>(string key, Func<AsaArchive, T> processSqlBytes, SaveHeaderRecord? saveHeader = null)
     {
@@ -366,11 +371,7 @@ public class AsaSaveReader : IDisposable
             var sqlBytes = GetSqlBytes(reader, 0);
             DumpDebugBytes(Path.Combine("custom", key + ".bin"), sqlBytes);
 
-            using var stream = new MemoryStream(sqlBytes);
-            using var archive = new AsaArchive(_logger, stream, $"{_saveFile}/custom/{key}")
-            {
-                StringPool = _stringPool,
-            };
+            using var archive = new AsaArchive(_logger, sqlBytes, $"{_saveFile}/custom/{key}");
             if(saveHeader != null)
             {
                 archive.NameTable = saveHeader.NameTable;
@@ -419,8 +420,7 @@ public class AsaSaveReader : IDisposable
             _cachedSaveHeader = null;
             _cachedGameModeCustomBytes = null;
             _cachedActorTransforms = null;
-            _stringPool.Clear();
-
+            
             _disposed = true;
         }
     }

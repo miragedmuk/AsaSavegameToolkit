@@ -266,4 +266,5 @@ public class GameObjectRecord
         var name = Names.Count > 0 ? Names[0] : ClassName.FullName;
         return $"GameObject({name}, {Properties.Count} properties)";
     }
+
 }

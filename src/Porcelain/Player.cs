@@ -55,11 +55,6 @@ public class Player
     /// </summary>
     public FQuat? Rotation { get; private set; }
 
-    /// <summary>
-    /// The underlying raw record for direct property access.
-    /// </summary>
-    public GameObjectRecord? Record { get; set; }
-
 
     public override string ToString() => PlayerName ?? ClassName;
 
@@ -70,37 +65,48 @@ public class Player
     {
 
 
-        var myData = profileRecord.Properties.Get<StructProperty>("MyData").Value as List<Property>;
-        var persistentConfigProperties = myData.Get<StructProperty>("MyPersistentCharacterStats").Value as List<Property>;
-        var persistentStatusProperties = myData.Get<StructProperty>("MyPlayerCharacterConfig").Value as List<Property>;
-        var linkedPlayerDataId = myData.Get<ulong>("PlayerDataID");
+        //arkprofile data
+        var myDataProperties = profileRecord.Properties.Get<StructProperty>("MyData").Value as List<Property>;
+        var persistentConfigProperties = myDataProperties.Get<StructProperty>("MyPersistentCharacterStats").Value as List<Property>;
+        var persistentStatusProperties = myDataProperties.Get<StructProperty>("MyPlayerCharacterConfig").Value as List<Property>;
+        var linkedPlayerDataId = myDataProperties.Get<ulong>("PlayerDataID");
         string characterName = persistentStatusProperties.Get<string>("PlayerCharacterName");
-        int playerLevel = 0;
+        int playerLevel = 1;
 
-        if (gameRecord == null)
+        if (gameRecord == null) //in-game data not found for this .arkprofile data
         {
-
-            for(int i = 0; i < 12; i++)
-            {
-                playerLevel += persistentStatusProperties.Get<byte>($"CharacterStatusComponent_NumberOfLevelUpPointsApplied",i);
-            }
-               
             var player = new Player
             {
                 Id = profileRecord.Uuid,
                 ClassName = profileRecord.ClassName.Name,
-                PlayerName = myData.Get<string>("PlayerName"),
+                PlayerName = myDataProperties.Get<string>("PlayerName"),
                 ChracterName = characterName,
                 TribeId = (int)linkedPlayerDataId,
                 Level = playerLevel,
                 PlayerDataId = (long)linkedPlayerDataId,
                 Location = transform?.Location,
-                Rotation = transform?.Rotation,
-                Record = profileRecord
+                Rotation = transform?.Rotation                
             };
 
             return player;
         }
+
+
+        //in-game data
+        var statusComponent = gameRecord.GetCharacterStatusComponent();
+
+        if (statusComponent != null)
+        {
+
+            for (int i = 0; i < 12; i++)
+            {
+                playerLevel += statusComponent.Properties.Get<byte>($"NumberOfLevelUpPointsApplied", i);
+            }
+
+        }
+
+
+
 
 
         return new Player
@@ -113,8 +119,7 @@ public class Player
             Level = gameRecord.GetFullLevel(),
             PlayerDataId = (long)linkedPlayerDataId,
             Location = transform?.Location,
-            Rotation = transform?.Rotation,
-            Record = profileRecord
+            Rotation = transform?.Rotation
         };
 
     }

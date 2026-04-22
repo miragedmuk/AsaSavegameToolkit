@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
 using System.Threading;
+using System.Threading.Tasks;
 using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Readers;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
-
+using CommunityToolkit.HighPerformance.Buffers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -27,29 +29,32 @@ public class AsaSaveGame
         logger ??= NullLogger.Instance;
         
         using var reader = new AsaSaveReader(path, logger, settings ?? AsaReaderSettings.None);
+        /*
         using var cryoReader = new CryopodReader(logger, settings);
-
-        var tribeReader = new ArkTribeReader(Path.GetDirectoryName(path), logger, settings ?? AsaReaderSettings.None);
+       
+        using var tribeReader = new ArkTribeReader(Path.GetDirectoryName(path), logger, settings ?? AsaReaderSettings.None);
         var tribeData = tribeReader.Read();
 
-        var profileReader = new ArkProfileReader(Path.GetDirectoryName(path), logger, settings ?? AsaReaderSettings.None);
+        using var profileReader = new ArkProfileReader(Path.GetDirectoryName(path), logger, settings ?? AsaReaderSettings.None);
         var playerData = profileReader.Read();
+        */
 
         var header = reader.ReadSaveHeader(cancellationToken);
-        var gameObjects = reader.ReadGameRecords(tribeData, playerData, cancellationToken);
+        var gameObjects = reader.ReadGameRecords(cancellationToken);
         var transforms = reader.ReadActorTransforms(cancellationToken).Transforms;
         var customBytes = reader.ReadGameModeCustomBytes(cancellationToken);
 
-        var creatureRecords = new Dictionary<Guid, GameObjectRecord>();
-        var droppedItemRecords = new Dictionary<Guid, GameObjectRecord>();
-        var inventoryItemRecords = new Dictionary<Guid, GameObjectRecord>();
-        var playerComponentRecords = new Dictionary<Guid, GameObjectRecord>();
-        var structureRecords = new Dictionary<Guid, GameObjectRecord>();
-        var deathCacheRecords = new Dictionary<Guid, GameObjectRecord>();
-        var ignoredRecords = new Dictionary<Guid, GameObjectRecord>();
-        var unknownRecords = new Dictionary<Guid, GameObjectRecord>();
-
-
+        var creatureRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var cryoRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var droppedItemRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var inventoryItemRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var tribeRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var profileRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();  
+        var playerComponentRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var structureRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var deathCacheRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var ignoredRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var unknownRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
 
 
         // Place all top-level objects (those with only 1 name) into the recordsByName dictionary so they
@@ -62,6 +67,7 @@ public class AsaSaveGame
         // Second pass: for each game object with multiple names, find its parent object in recordsByName using the
         // last name in the Names list, then crawl down the component stack using the preceding names until we find the
         // correct parent to attach this component to.
+
         foreach (var gameObject in gameObjects.Values.Where(x => x.Names.Count > 1))
         {
             var parentName = gameObject.Names[^1];
@@ -76,7 +82,8 @@ public class AsaSaveGame
                         gameObject.Names[1],
                         gameObject.Names[0]);
                 }
-                continue;
+
+                    continue;
             }
 
             // The component names are in deepest-first order, so crawl from the back of the list forward down the component stack
@@ -88,12 +95,21 @@ public class AsaSaveGame
 
             parent.Components[gameObject.Names[0]] = gameObject;
         }
+        recordsByName = null!;
+
 
         // Third Pass: now that we've nested all the components, we can categorize the top level game objects by type
-        foreach (var gameObject in recordsByName.Values)
+        Parallel.ForEach(gameObjects.Values, gameObject =>
+        //foreach (var gameObject in gameObjects.Values)
         {
-            if (gameObject.IsCreature())
+            if (gameObject.IsCreature() && !gameObject.Properties.HasAny("IsStored"))
                 creatureRecords[gameObject.Uuid] = gameObject;
+            else if (gameObject.Properties.HasAny("IsStored"))
+                cryoRecords[gameObject.Uuid] = gameObject;
+            else if (gameObject.IsTribe())
+                tribeRecords[gameObject.Uuid] = gameObject;
+            else if (gameObject.IsProfile())
+                profileRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsPlayerComponent())
                 playerComponentRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsStructure())
@@ -108,39 +124,48 @@ public class AsaSaveGame
                 ignoredRecords[gameObject.Uuid] = gameObject;
             else
                 unknownRecords[gameObject.Uuid] = gameObject;
-        }
+        });
+
+        var test = gameObjects.Where(x => x.Value.Properties.HasAny("IsStored")).ToList();
 
         // The full record dictionaries are no longer needed now that every object has been
         // placed into a typed bucket. Release them so the GC can collect the raw
         // GameObjectRecord graph before we begin allocating the Porcelain objects.
         gameObjects = null!;
-        recordsByName = null!;
 
-        var tribes = tribeData.ToDictionary(
-                r => r.Uuid,
-                r => new Tribe(r)
-            );
+
 
         var structures = structureRecords.ToDictionary(
             r => r.Key,
             r => Structure.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null));
 
-        var players = playerData.ToDictionary(
-            r => r.Uuid, 
+        var players = profileRecords.ToDictionary(
+            r => r.Key, 
             r => 
             {
                 ulong playerDataId = 0;
-                var myData = r.Properties.Get<StructProperty>("MyData");
+                var myData = r.Value.Properties.Get<StructProperty>("MyData");
                 if (myData != null)
                 {
                     List<Property> properties = (List<Property>)myData.Value;
                     playerDataId = properties.Get<ulong>("PlayerDataID");
                 }
-                var playerComponents = playerComponentRecords.Values.FirstOrDefault(v => v.Properties.Get<ulong>("LinkedPlayerDataID") == playerDataId);
-                var playerId = playerComponents?.Uuid??Guid.Empty;
+                GameObjectRecord? playerComponents = playerComponentRecords.Values.FirstOrDefault(v => v.Properties.Get<ulong>("LinkedPlayerDataID") == playerDataId);
+                
+                ActorTransform? actorLocation = null;
+                if(playerComponents!=null)
+                    actorLocation = transforms.TryGetValue(playerComponents.Uuid, out var t) ? t : null;
 
-                return Player.Create(r, playerComponents, transforms.TryGetValue(playerId, out var t) ? t : null);
+                return Player.Create(r.Value, playerComponents, actorLocation);
             });
+
+
+        var tribes = tribeRecords.ToDictionary(
+        r => r.Key,
+        r =>
+        {
+            return Tribe.Create(r.Value);
+        });
 
         var creatures = creatureRecords.ToDictionary(
             r => r.Key,
@@ -160,6 +185,9 @@ public class AsaSaveGame
 
         var wildCreatures = creatures.Values.Where(c => !c.IsTamed).ToDictionary(x => x.Id);
 
+
+
+        /*
         // Extract creatures from cryopods. Each cryopod item holds compressed byte arrays that represent the
         // creature, status component and saddles that would be spawned on deployment. These are not world objects, so
         // they get their own list rather than appearing in TamedCreatures.
@@ -237,8 +265,8 @@ public class AsaSaveGame
                 cryopoddedCreatures[cryoCreature.Id] = cryoCreature;
             }
         }
+        */
 
-        
         return new AsaSaveGame
         {
             SaveVersion = header.SaveVersion,
@@ -246,7 +274,7 @@ public class AsaSaveGame
             Tribes = tribes,
             TamedCreatures = tamedCreatures,
             WildCreatures = wildCreatures,
-            CryopoddedCreatures = cryopoddedCreatures,
+            CryopoddedCreatures = null,
             Structures = structures,
             DroppedItems = droppedItems,
         }; 

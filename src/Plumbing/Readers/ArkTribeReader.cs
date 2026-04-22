@@ -1,117 +1,56 @@
-﻿using AsaSavegameToolkit.Plumbing.Properties;
-using AsaSavegameToolkit.Plumbing.Records;
-using Microsoft.Data.Sqlite;
+﻿using AsaSavegameToolkit.Plumbing.Records;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Data.Common;
 using System.Linq;
-using System.Runtime;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace AsaSavegameToolkit.Plumbing.Readers
 {
-    public class ArkTribeReader
+    public  class ArkTribeReader: IDisposable
     {
-        private readonly string _saveDirectory;
         private readonly ILogger _logger;
         private readonly AsaReaderSettings _settings;
-        private bool _disposed;
 
 
-        public ArkTribeReader(string saveDirectory, ILogger? logger = default, AsaReaderSettings? settings = default)
+        public ArkTribeReader(ILogger? logger = default, AsaReaderSettings? settings = default)
         {
-            ArgumentException.ThrowIfNullOrEmpty(saveDirectory);
-
-            if (!Directory.Exists(saveDirectory))
-            {               
-                throw new DirectoryNotFoundException($"Save path not found: {saveDirectory}");
-            }
-
-            _saveDirectory = saveDirectory;
             _logger = logger ?? NullLogger.Instance;
             _settings = settings ?? AsaReaderSettings.None;
         }
 
-        public List<GameObjectRecord> Read()
+
+        public void Dispose() { } // no unmanaged resources; IDisposable enables the `using` pattern
+
+        public List<GameObjectRecord> Read(string saveDirectory, CancellationToken cancellationToken = default)
         {
-            var tribeFiles = Directory.EnumerateFiles(_saveDirectory, "*.arktribe");
-            var tribeBag = new List<GameObjectRecord>();
-            var exceptions = new ConcurrentBag<Exception>();
+            var tribeFiles = Directory.EnumerateFiles(saveDirectory, "*.arktribe");
+
+            ConcurrentBag<GameObjectRecord> tribeBag = new();
             Parallel.ForEach(tribeFiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, filePath =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 try
                 {
-                    var parsed = ReadTribeFile(filePath);
-                    
-                    if (parsed != null)
+                    var tribeGameObject = ArkTribeRecord.ReadFromFile(filePath, Guid.NewGuid());
+                    if (tribeGameObject != null)
                     {
-                        tribeBag.Add(parsed);
+                        tribeBag.Add(tribeGameObject);
                     }
                 }
-                catch (Exception ex)
+                catch(Exception ex)
                 {
                     _logger.LogError(ex, "Failed to read tribe file {FilePath}", filePath);
                 }
-            }
-            );
+
+            });
+
             return tribeBag.ToList();
-
-
-        }
-
-        private GameObjectRecord? ReadTribeFile(string filePath)
-        {
-            string mapName = "Unknown Map";
-            var timestamp = File.GetLastWriteTimeUtc(filePath);
-            using var stream = File.OpenRead(filePath);
-            using var archive = new AsaArchive(NullLogger.Instance, stream, filePath);
-
-            // Header sequence
-            var fileVersion = archive.ReadInt32(); // tribeVersion
-            
-            if (fileVersion < 7) throw new AsaDataException($"Unsupported .arktribe version: {fileVersion}");
-            archive.SaveVersion = (short)fileVersion;
-            archive.IsArkFile = true;
-
-
-            _ = archive.ReadBytes(12); // ID, Save Count, Table Offset
-            _ = archive.ReadBytes(16); // GUID
-
-            var fileType = archive.ReadString();
-            _ = archive.ReadInt32(); 
-
-            var names = archive.ReadStringArray(); // Map Name table strings
-            if (names != null && names.Length > 3)
-            {
-                mapName = names[3]; // Map name
-            }
-
-            _ = archive.ReadInt32(); // shouldBeZero
-            _ = archive.ReadBytes(16); // Padding/Struct ID
-            _ = archive.ReadBytes(1);  // Separator
-
-            //Properties
-            var properties = ReadProperties(archive);
-            ObjectTypeFlags objectType = ObjectTypeFlags.Actor;
-
-            return new GameObjectRecord(Guid.NewGuid(), new Primitives.FName(0, 0, fileType), names, properties, 0, objectType, default);
-        }
-
-        public static List<Property> ReadProperties(AsaArchive archive)
-        {
-
-            var results = new List<Property>();
-            while (true)
-            {
-                var prop = Property.Read(archive);
-                if (prop == null) break;
-                results.Add(prop);
-            }
-            return results;
         }
 
     }
