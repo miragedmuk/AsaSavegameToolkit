@@ -82,7 +82,7 @@ public abstract class Property
         }
         else if (archive.Position > expectedEnd)
         {
-            if (!archive.IsArkFile)
+            if (!(archive.IsArkFile || archive.IsCryopod))
             {
                 archive.Position = expectedEnd;
                 throw new AsaDataException($"Property parsing read more bytes than expected at offset {start} in {archive.FileName}");

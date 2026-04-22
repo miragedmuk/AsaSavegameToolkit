@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using AsaSavegameToolkit.Plumbing.Primitives;
 using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Readers;
 using AsaSavegameToolkit.Plumbing.Records;
@@ -126,14 +127,11 @@ public class AsaSaveGame
                 unknownRecords[gameObject.Uuid] = gameObject;
         });
 
-        var test = gameObjects.Where(x => x.Value.Properties.HasAny("IsStored")).ToList();
-
+        
         // The full record dictionaries are no longer needed now that every object has been
         // placed into a typed bucket. Release them so the GC can collect the raw
         // GameObjectRecord graph before we begin allocating the Porcelain objects.
         gameObjects = null!;
-
-
 
         var structures = structureRecords.ToDictionary(
             r => r.Key,
@@ -181,91 +179,11 @@ public class AsaSaveGame
             r => r.Key,
             r => Item.Create(r.Value));
 
+
         var tamedCreatures = creatures.Values.Where(c => c.IsTamed).ToDictionary(x => x.Id);
 
         var wildCreatures = creatures.Values.Where(c => !c.IsTamed).ToDictionary(x => x.Id);
 
-
-
-        /*
-        // Extract creatures from cryopods. Each cryopod item holds compressed byte arrays that represent the
-        // creature, status component and saddles that would be spawned on deployment. These are not world objects, so
-        // they get their own list rather than appearing in TamedCreatures.
-        // Filter: class must have a CustomItemData with CustomDataName=="Dino" and a non-empty dino blob at CustomDataBytes[0].
-        var cryopoddedCreatures = new Dictionary<Guid, Creature>();
-        foreach (var cryopod in inventoryItemRecords.Values.Where(r => r.HasCryoCreature()))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var cryoRecordSets = cryoReader.ReadCryopodData(cryopod, cancellationToken).ToList();
-
-            // Cryopod records allow for multiple CustomItemDatas entries, each one should probably be processed as a
-            // single dino. Still, warn if we see anything other that 1 set
-
-            if (cryoRecordSets.Count == 0)
-            {
-                logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} does not contain any creature data", cryopod.Names[0], cryopod.Uuid);
-                continue;
-            }
-
-            if (cryoRecordSets.Count > 1)
-            {
-                logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} contains more than on set of creature data", cryopod.Names[0], cryopod.Uuid);
-            }
-
-            // Nest status components under their parent dino so Creature.Create() can read stat levels.
-            // Normally, a creature's equipped saddle still appears in its inventory with an IsEquipped property set.
-            // In the cryopod, there is no inventory component and the saddle is in its own record. To make them more
-            // like normal creatures, we'll wrap the saddle in an inventory component and attach that to the creature.
-
-            foreach (var cryoRecords in cryoRecordSets)
-            {
-                var dinoRecords = cryoRecords.Where(r => r.IsCreature()).ToArray();
-                if (dinoRecords.Length > 1)
-                {
-                    logger.LogWarning("Cryopod parsing returned more than one dino object");
-                }
-
-                var dinoRecord = dinoRecords.FirstOrDefault();
-                if (dinoRecord == null)
-                {
-                    logger.LogWarning("Cryopod parsing returned no dino records");
-                    continue;
-                }
-                
-                var cryoCreature = Creature.Create(dinoRecord, null);
-
-                if (cryoRecords.Length > 1)
-                {
-                    // process the DinoCharacterStatusComponent record
-                    cryoCreature.IngestStatusRecord(cryoRecords[1]);
-                }
-
-                if (cryoRecords.Length > 2)
-                {
-                    // process the costume record
-                    //cryoCreature.IngestCostumeRecord(cryoRecords[2]);
-                }
-
-                if (cryoRecords.Length > 3)
-                {
-                    // process the saddle record
-                    var saddleObject = Item.FromCryoSaddle(cryoRecords[3]);
-                    cryoCreature.Inventory = new Inventory
-                    {
-                        Id = Guid.NewGuid(),
-                        ClassName = "CryoSaddleInventory",
-                        Items = 
-                        {
-                            [saddleObject.Id] = saddleObject
-                        }
-                    };
-                }
-
-                cryoCreature.IsInCryo = true;
-                cryopoddedCreatures[cryoCreature.Id] = cryoCreature;
-            }
-        }
-        */
 
         return new AsaSaveGame
         {
