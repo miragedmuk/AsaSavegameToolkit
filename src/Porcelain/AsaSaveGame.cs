@@ -30,15 +30,6 @@ public class AsaSaveGame
         logger ??= NullLogger.Instance;
         
         using var reader = new AsaSaveReader(path, logger, settings ?? AsaReaderSettings.None);
-        /*
-        using var cryoReader = new CryopodReader(logger, settings);
-       
-        using var tribeReader = new ArkTribeReader(Path.GetDirectoryName(path), logger, settings ?? AsaReaderSettings.None);
-        var tribeData = tribeReader.Read();
-
-        using var profileReader = new ArkProfileReader(Path.GetDirectoryName(path), logger, settings ?? AsaReaderSettings.None);
-        var playerData = profileReader.Read();
-        */
 
         var header = reader.ReadSaveHeader(cancellationToken);
         var gameObjects = reader.ReadGameRecords(cancellationToken);

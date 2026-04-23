@@ -1,11 +1,3 @@
-using System;
-using System.Collections.ObjectModel;
-using System.IO.Compression;
-using System.Reflection.Metadata;
-using System.Reflection.Metadata.Ecma335;
-using System.Threading;
-using System.Xml;
-
 using AsaSavegameToolkit.Plumbing.Primitives;
 using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
@@ -13,6 +5,14 @@ using AsaSavegameToolkit.Plumbing.Utilities;
 using AsaSavegameToolkit.Porcelain;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.IO.Compression;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Threading;
+using System.Xml;
 
 namespace AsaSavegameToolkit.Plumbing.Readers;
 
@@ -177,12 +177,86 @@ public sealed class CryopodReader : IDisposable
                     dinoComponent.Properties.Remove(statusReferenceProperty);
                     dinoComponent.Properties.Add(newProperty);
 
-                }
+                }           
             }
 
-            var inventoryComponent = cryoGameObjects.FirstOrDefault(r => r.IsInventory());
-            if (inventoryComponent != null)
+
+
+
+            var inventoryItemRecords = cryoGameObjects.Where(r=>r.Properties.HasAny("OwnerInventory")).ToList(); 
+            if(inventoryItemRecords!=null && inventoryItemRecords.Count > 0)
             {
+                var containerId = Guid.NewGuid();
+
+                List<ObjectReference> itemReferences = new List<ObjectReference>();
+
+                foreach (var itemObject in inventoryItemRecords)
+                {
+                    var ownerInventoryRef = itemObject.Properties.Get<ObjectProperty>("OwnerInventory");
+                    ownerInventoryRef.Value = new ObjectReference()
+                    {
+                        IsPath = false,
+                        ObjectId = containerId
+                    };
+
+
+                    //Item ObjectReference
+                    var itemReference = new ObjectReference()
+                    {
+                        IsPath = false,
+                        ObjectId = itemObject.Uuid
+                    };
+                    itemReferences.Add(itemReference);
+                }
+
+
+                //container                    
+                List<Property> containerProperties = new List<Property>();
+                string[] containerNames = new string[1];
+                containerNames[0] = "PrimalItemInventoryBP_AST";
+
+                //bInitializedMe
+                containerProperties.Add(new BoolProperty()
+                {
+                    Tag = new PropertyTag()
+                    {
+                        Name = new FName(0, 0, "bInitializedMe"),
+                        Type = FPropertyTypeName.Create(new FName(0, 0, "BoolProperty")),
+                        Size = 1,
+                        ArrayIndex = 0,
+                        Flags = 0
+                    },
+                    Value = true
+                });
+
+
+                //Items (ArrayProperty<ObjectReference>)                     
+                var itemsProperty = new ArrayProperty()
+                {
+                    Tag = new PropertyTag()
+                    {
+                        Name = new FName(0, 0, "Items"),
+                        Type = FPropertyTypeName.Create(new FName(0, 0, "ArrayProperty"), new FName(0, 0, "ObjectReference")),
+                        Size = 1,
+                        ArrayIndex = 0,
+                        Flags = 0
+                    },
+                    Value = itemReferences
+                };
+
+                containerProperties.Add(itemsProperty);
+
+                GameObjectRecord containerObject = new GameObjectRecord(
+                    containerId,
+                    new FName(0, 0, "PrimalItemInventoryBP_AST"),
+                    containerNames,
+                    containerProperties,
+                    dataFileIndex: 0,
+                    ObjectTypeFlags.None,
+                    extraGuids: []
+                );
+
+
                 dinoComponent.Properties.Add(new ObjectProperty()
                 {
                     Tag = new PropertyTag()
@@ -196,10 +270,17 @@ public sealed class CryopodReader : IDisposable
                     Value = new ObjectReference()
                     {
                         IsPath = false,
-                        ObjectId = inventoryComponent.Uuid
+                        ObjectId = containerId
                     }
                 });
+
+
+                var lastRecordset = results.Last();
+                lastRecordset = lastRecordset.Append(containerObject).ToArray();
+                results[results.Count - 1] = lastRecordset;
             }
+
+
 
         }
         
@@ -417,7 +498,7 @@ public sealed class CryopodReader : IDisposable
                         Value = new ObjectReference()
                         {
                             IsPath = false,
-                            ObjectId = containerId
+                            ObjectId = Guid.Empty
                         }
                     });
 
@@ -437,60 +518,7 @@ public sealed class CryopodReader : IDisposable
 
 
 
-                    //container                    
-                    List<Property> containerProperties = new List<Property>();
-                    string[] containerNames = new string[1];
-                    containerNames[0] = "PrimalItemInventoryBP_AST";
-
-                    //bInitializedMe
-                    containerProperties.Add(new BoolProperty()
-                    {
-                        Tag = new PropertyTag()
-                        {
-                            Name = new FName(0, 0, "bInitializedMe"),
-                            Type = FPropertyTypeName.Create(new FName(0, 0, "BoolProperty")),
-                            Size = 1,
-                            ArrayIndex = 0,
-                            Flags = 0
-                        },
-                        Value = true
-                    });
-
-                    //Item ObjectReference
-                    var itemReference = new ObjectReference()
-                    {
-                        IsPath = false,
-                        ObjectId = itemObject.Uuid
-                    };
-                    List<ObjectReference> itemReferences = new List<ObjectReference>() { itemReference };
-
-                    //Items (ArrayProperty<ObjectReference>)                     
-                    var itemsProperty = new ArrayProperty()
-                    {
-                        Tag = new PropertyTag()
-                        {
-                            Name = new FName(0, 0, "Items"),
-                            Type = FPropertyTypeName.Create(new FName(0, 0, "ArrayProperty"), new FName(0, 0, "ObjectReference")),
-                            Size = 1,
-                            ArrayIndex = 0,
-                            Flags = 0
-                        },
-                        Value = itemReferences
-                    };
-
-                    containerProperties.Add(itemsProperty);
-
-                    GameObjectRecord containerObject = new GameObjectRecord(
-                        containerId,
-                        new FName(0,0,"PrimalItemInventoryBP_AST"),
-                        containerNames,
-                        containerProperties, 
-                        dataFileIndex: 0,
-                        ObjectTypeFlags.None,
-                        extraGuids: []
-                    );
-
-                    results.Add(containerObject);
+                    
                 }
             }
         }
