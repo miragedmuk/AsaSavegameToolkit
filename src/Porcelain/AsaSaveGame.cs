@@ -170,6 +170,10 @@ public class AsaSaveGame
             r => Creature.Create(r.Value,transforms.TryGetValue(r.Key, out var t) ? t : null));
 
 
+        var cryoCreatures = cryoRecords.ToDictionary(
+        r => r.Key,
+        r => Creature.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null, true) );
+
 
         var droppedItems = droppedItemRecords.ToDictionary(
             r => r.Key,
@@ -178,6 +182,7 @@ public class AsaSaveGame
         var inventoryItems = inventoryItemRecords.ToDictionary(
             r => r.Key,
             r => Item.Create(r.Value));
+
 
 
         var tamedCreatures = creatures.Values.Where(c => c.IsTamed).ToDictionary(x => x.Id);
@@ -192,7 +197,7 @@ public class AsaSaveGame
             Tribes = tribes,
             TamedCreatures = tamedCreatures,
             WildCreatures = wildCreatures,
-            CryopoddedCreatures = null,
+            CryopoddedCreatures = cryoCreatures,
             Structures = structures,
             DroppedItems = droppedItems,
         }; 

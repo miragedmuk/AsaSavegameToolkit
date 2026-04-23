@@ -1,4 +1,5 @@
 using AsaSavegameToolkit.Plumbing.Readers;
+using AsaSavegameToolkit.Plumbing.Utilities;
 using AsaSavegameToolkit.Porcelain;
 using AsaSavegameToolkit.Tests.Helpers;
 
@@ -9,6 +10,36 @@ public class CreatureTests : SaveTests
 {
     // Yutyrannus from game object record tests - confirmed present in both versions
     private const string YutyrannusId = "fe4b48ad-4d96-de0d-98e8-9d9b75e8413a";
+    private const string RexId = "f2ad10f5-4317-3b46-36b2-afb639b20329";
+
+    [TestMethod]
+    public void IsCryoRelease_DataMatched()
+    {
+
+        var cryoSaveFile = Path.Combine(TestSettings.AssetsDirectory, "version_14/LostColony_WP_Cryo.ark");
+        using var reader1 = new AsaSaveReader(cryoSaveFile, TestContext.GetLogger());
+        var records1 = reader1.ReadGameRecords(TestContext.CancellationToken);
+
+
+        var releaseSaveFile = Path.Combine(TestSettings.AssetsDirectory, "version_14/LostColony_WP_Free.ark");
+        using var reader2 = new AsaSaveReader(releaseSaveFile, TestContext.GetLogger());
+        var records2 = reader2.ReadGameRecords(TestContext.CancellationToken);
+
+        var cryoCreatureRecord = records1[Guid.Parse(RexId)];
+        Assert.IsNotNull(cryoCreatureRecord, "Cryo creature cannot be found.");
+        var freeCreatureRecord = records2[Guid.Parse(RexId)];
+        Assert.IsNotNull(freeCreatureRecord, "Free creature cannot be found.");
+        
+        var cryoCreature = Creature.Create(cryoCreatureRecord, transform: null, true);
+        var freeCreature = Creature.Create(freeCreatureRecord, transform: null, false);
+
+        Assert.IsTrue(cryoCreature.IsInCryo, "Cryo creature should have IsInCryo=true");
+        Assert.IsFalse(freeCreature.IsInCryo, "Free creature should have IsInCryo=false");
+        Assert.AreEqual(cryoCreature.DinoId, freeCreature.DinoId, "DinoId should match between cryo and free versions of the same creature");
+        Assert.AreEqual(cryoCreature.ClassName, freeCreature.ClassName, "ClassName should match between cryo and free versions of the same creature");       
+        Assert.AreEqual(cryoCreature.BaseLevel, freeCreature.BaseLevel, "BaseLevel should match between cryo and free versions of the same creature");
+        Assert.AreEqual(cryoCreature.ColorRegions, freeCreature.ColorRegions, "Colors should match between cryo and free versions of the same creature");
+    }
 
     [TestMethod]
     public void IsCreature_Version13_ReturnsTrue()
@@ -72,7 +103,6 @@ public class CreatureTests : SaveTests
         _ = creature.TribeName;
         _ = creature.TamerString;
         _ = creature.BaseLevel;
-        _ = creature.ExtraLevel;
         _ = creature.TotalLevel;
         _ = creature.MutationsMale;
         _ = creature.MutationsFemale;
@@ -82,8 +112,7 @@ public class CreatureTests : SaveTests
         _ = creature.BabyAge;
         _ = creature.IsJuvenile;
         _ = creature.TamedAtTime;
-        _ = creature.DinoId1;
-        _ = creature.DinoId2;
+        _ = creature.DinoId;
         _ = creature.ColorRegions;
         _ = creature.ToString();
     }
@@ -105,7 +134,6 @@ public class CreatureTests : SaveTests
         _ = creature.TribeName;
         _ = creature.TamerString;
         _ = creature.BaseLevel;
-        _ = creature.ExtraLevel;
         _ = creature.TotalLevel;
         _ = creature.MutationsMale;
         _ = creature.MutationsFemale;
@@ -115,8 +143,7 @@ public class CreatureTests : SaveTests
         _ = creature.BabyAge;
         _ = creature.IsJuvenile;
         _ = creature.TamedAtTime;
-        _ = creature.DinoId1;
-        _ = creature.DinoId2;
+        _ = creature.DinoId;
         _ = creature.ColorRegions;
         _ = creature.ToString();
     }

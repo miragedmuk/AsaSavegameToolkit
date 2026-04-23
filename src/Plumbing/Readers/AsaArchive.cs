@@ -69,6 +69,13 @@ public class AsaArchive : IDisposable
 
     // --- Primitive reads implemented over spans / BinaryPrimitives ---
 
+
+
+    public void WriteToFile(string fileName)
+    {
+        File.WriteAllBytes(fileName, _data.ToArray());
+    }
+
     private ReadOnlySpan<byte> SpanAt(long offset, int count)
     {
         if (offset < 0 || count < 0 || offset + count > _data.Length)

@@ -20,7 +20,9 @@ public abstract class Property
     /// Note: boxes value types (int, float, etc.) - avoid in hot paths.
     /// </summary>
     public abstract object GetValue();
-    
+
+
+
     /// <summary>
     /// Reads the next property from the archive.
     /// Returns null if the property name is "None" (end of property list).

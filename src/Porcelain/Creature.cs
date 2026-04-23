@@ -180,7 +180,7 @@ public class Creature
     /// <summary>
     /// Creates a new Creature instance from a record and transform.
     /// </summary>
-    public static Creature Create(GameObjectRecord actor, ActorTransform? transform)
+    public static Creature Create(GameObjectRecord actor, ActorTransform? transform, bool isInCryo = false)
     {
         var properties = actor.Properties;
 
@@ -204,6 +204,7 @@ public class Creature
         {
             Id = actor.Uuid,
             ClassName = actor.GetClassName(),
+            IsInCryo = isInCryo,
             TamedName = properties.Get<string>("TamedName"),
             TribeName = properties.Get<string>("TribeName"),
             TamerString = properties.Get<string>("TamerString"),

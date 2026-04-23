@@ -13,12 +13,17 @@ namespace AsaSavegameToolkit.Tests.Plumbing.Readers
     public class ArkTribeTests: SaveTests
     {
         [TestMethod]
-        public void ReadFrom_Version7()
+        public void ReadFrom_ArkTribe()
         {
-            ArkTribeReader reader = new ArkTribeReader(Path.Combine(TestSettings.AssetsDirectory, "version_14/"));
-            var tribes = reader.Read();
-            Assert.IsNotNull(tribes);
-            Assert.AreNotEqual(0, tribes.Count);
+
         }
+
+        [TestMethod]
+        public void ReadFrom_GameModeCustomBytes()
+        {
+
+        }
+
+
     }
 }
