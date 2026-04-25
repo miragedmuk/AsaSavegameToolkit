@@ -90,6 +90,8 @@ public class AsaSaveGame
         recordsByName = null!;
 
 
+        var sheep = gameObjects.Values.Where(f => f.Names.Count > 1 && f.Names[1] == "Sheep_Character_BP_C_2147152454").ToList();
+
         // Third Pass: now that we've nested all the components, we can categorize the top level game objects by type
         Parallel.ForEach(gameObjects.Values, gameObject =>
         //foreach (var gameObject in gameObjects.Values)
@@ -163,7 +165,7 @@ public class AsaSaveGame
 
         var cryoCreatures = cryoRecords.ToDictionary(
         r => r.Key,
-        r => Creature.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null, true) );
+        r => Creature.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null) );
 
 
         var droppedItems = droppedItemRecords.ToDictionary(

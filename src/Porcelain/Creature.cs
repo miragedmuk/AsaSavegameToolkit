@@ -180,12 +180,12 @@ public class Creature
     /// <summary>
     /// Creates a new Creature instance from a record and transform.
     /// </summary>
-    public static Creature Create(GameObjectRecord actor, ActorTransform? transform, bool isInCryo = false)
+    public static Creature Create(GameObjectRecord actor, ActorTransform? transform)
     {
         var properties = actor.Properties;
 
         var dinoId = long.Parse(string.Concat(properties.Get<uint>("DinoID1", 0), properties.Get<uint>("DinoID2", 0)));
-
+        bool isInCryo = properties.Get<bool>("IsStored");
         var mutationsMale = properties.Get<int>("RandomMutationsMale");
         var mutationsFemale = properties.Get<int>("RandomMutationsFemale");
         var baseLevel = actor.GetBaseLevel();

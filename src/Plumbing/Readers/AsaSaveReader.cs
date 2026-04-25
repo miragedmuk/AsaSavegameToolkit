@@ -194,7 +194,7 @@ public class AsaSaveReader : IDisposable
 
                     if (cryoRecordSets.Count > 1)
                     {
-                        _logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} contains more than on set of creature data", cryopod.Names[0], cryopod.Uuid);
+                        _logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} contains more than one set of data", cryopod.Names[0], cryopod.Uuid);
                     }
 
                     // Nest status components under their parent dino so Creature.Create() can read stat levels.
@@ -215,26 +215,6 @@ public class AsaSaveReader : IDisposable
                         {
                             _logger.LogWarning("Cryopod parsing returned no dino records");
                             continue;
-                        }
-
-                        //var cryoCreature = Creature.Create(dinoRecord, null);
-
-                        if (cryoRecords.Length > 1)
-                        {
-                            // process the DinoCharacterStatusComponent record
-                            //cryoCreature.IngestStatusRecord(cryoRecords[1]);
-                        }
-
-                        if (cryoRecords.Length > 2)
-                        {
-                            // process the costume record
-                            //cryoCreature.IngestCostumeRecord(cryoRecords[2]);
-                        }
-
-                        if (cryoRecords.Length > 3)
-                        {
-                            // process the saddle record
-                            //var saddleObject = Item.FromCryoSaddle(cryoRecords[3]);
                         }
 
                         foreach(var cryoObject in cryoRecords)

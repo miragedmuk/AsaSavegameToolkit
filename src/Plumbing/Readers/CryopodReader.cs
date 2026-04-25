@@ -212,8 +212,9 @@ public sealed class CryopodReader : IDisposable
 
                 //container                    
                 List<Property> containerProperties = new List<Property>();
-                string[] containerNames = new string[1];
+                string[] containerNames = new string[2];
                 containerNames[0] = "PrimalItemInventoryBP_AST";
+                containerNames[1] = dinoComponent.Name.ToString();
 
                 //bInitializedMe
                 containerProperties.Add(new BoolProperty()
@@ -248,7 +249,7 @@ public sealed class CryopodReader : IDisposable
 
                 GameObjectRecord containerObject = new GameObjectRecord(
                     containerId,
-                    new FName(0, 0, "PrimalItemInventoryBP_AST"),
+                    new FName(0, 0, $"PrimalItemInventoryBP_{containerId.ToString()}"),
                     containerNames,
                     containerProperties,
                     dataFileIndex: 0,
@@ -274,10 +275,7 @@ public sealed class CryopodReader : IDisposable
                     }
                 });
 
-
-                var lastRecordset = results.Last();
-                lastRecordset = lastRecordset.Append(containerObject).ToArray();
-                results[results.Count - 1] = lastRecordset;
+                results.Add(new[] { containerObject });
             }
 
 
@@ -419,10 +417,15 @@ public sealed class CryopodReader : IDisposable
 
                 var objectId = props.Any(p => p.Tag.Name.ToString() == "bServerInitializedDino") ? meta.Uuid : Guid.NewGuid(); //re-assign uniqueid for non-dinos
 
+                string[] rootNames = new string[1];
+                rootNames[0] = meta.Names[0];
+
+                string[] objectNames = meta.Names[0] == "PersistentLevel" ? rootNames : meta.Names;
+
                 var gameObject = new GameObjectRecord(
                     objectId,
                     classFName,
-                    meta.Names,                    
+                    objectNames,                    
                     props,
                     meta.DataFileIndex,
                     ObjectTypeFlags.None,
@@ -474,7 +477,7 @@ public sealed class CryopodReader : IDisposable
 
                     //item
                     var classReference = props.Get<ObjectProperty>("ItemArchetype").Value as ObjectReference;
-                    FName className = new FName(0, 0, classReference.Value.Substring(classReference.Value.LastIndexOf(".") + 1));
+                    FName className = new FName(0, 0, classReference.Value);
                     var itemQuantityProp = props.Get<IntProperty>("ItemQuantity");
                     if (itemQuantityProp != null && itemQuantityProp.Value == 0)
                     {
@@ -515,10 +518,6 @@ public sealed class CryopodReader : IDisposable
                         extraGuids: []
                     );
                     results.Add(itemObject);
-
-
-
-                    
                 }
             }
         }
@@ -622,16 +621,20 @@ public sealed class CryopodReader : IDisposable
 
                 archive.Position = posBackup;
 
-                var objectId = props.Any(p => p.Tag.Name.ToString() == "bServerInitializedDino") ? meta.Uuid : Guid.NewGuid(); //re-assign uniqueid for non-dinos
+                var objectId = props.HasAny("bServerInitializedDino") ? meta.Uuid : Guid.NewGuid(); //re-assign uniqueid for non-dinos
 
+                string[] rootNames = new string[1];
+                rootNames[0] = meta.Names[0];
+
+                string[] objectNames = meta.Names[1] == "PersistentLevel" ? rootNames : meta.Names;
 
                 var gameObject = new GameObjectRecord(
                     objectId,
                     classFName,
-                    meta.Names,
+                    objectNames,
                     props,
                     meta.DataFileIndex,
-                    ObjectTypeFlags.None,
+                    props.HasAny("bServerInitialzedDino")?ObjectTypeFlags.Actor:ObjectTypeFlags.None,
                     extraGuids: []
                 );
 
@@ -700,7 +703,7 @@ public sealed class CryopodReader : IDisposable
                         Value = new ObjectReference()
                         {
                             IsPath = false,
-                            ObjectId = containerId
+                            ObjectId = Guid.Empty
                         }
                     });
 
@@ -718,62 +721,6 @@ public sealed class CryopodReader : IDisposable
                     );
                     results.Add(itemObject);
 
-
-
-                    //container                    
-                    List<Property> containerProperties = new List<Property>();
-                    string[] containerNames = new string[1];
-                    containerNames[0] = "PrimalItemInventoryBP_AST";
-
-                    //bInitializedMe
-                    containerProperties.Add(new BoolProperty()
-                    {
-                        Tag = new PropertyTag()
-                        {
-                            Name = new FName(0, 0, "bInitializedMe"),
-                            Type = FPropertyTypeName.Create(new FName(0, 0, "BoolProperty")),
-                            Size = 1,
-                            ArrayIndex = 0,
-                            Flags = 0
-                        },
-                        Value = true
-                    });
-
-                    //Item ObjectReference
-                    var itemReference = new ObjectReference()
-                    {
-                        IsPath = false,
-                        ObjectId = itemObject.Uuid
-                    };
-                    List<ObjectReference> itemReferences = new List<ObjectReference>() { itemReference };
-
-                    //Items (ArrayProperty<ObjectReference>)                     
-                    var itemsProperty = new ArrayProperty()
-                    {
-                        Tag = new PropertyTag()
-                        {
-                            Name = new FName(0, 0, "Items"),
-                            Type = FPropertyTypeName.Create(new FName(0, 0, "ArrayProperty"), new FName(0, 0, "ObjectReference")),
-                            Size = 1,
-                            ArrayIndex = 0,
-                            Flags = 0
-                        },
-                        Value = itemReferences
-                    };
-
-                    containerProperties.Add(itemsProperty);
-
-                    GameObjectRecord containerObject = new GameObjectRecord(
-                        containerId,
-                        new FName(0, 0, "PrimalItemInventoryBP_AST"),
-                        containerNames,
-                        containerProperties,
-                        dataFileIndex: 0,
-                        ObjectTypeFlags.None,
-                        extraGuids: []
-                    );
-
-                    results.Add(containerObject);
                 }
 
             }

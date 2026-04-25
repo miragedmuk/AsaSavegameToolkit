@@ -30,8 +30,8 @@ public class CreatureTests : SaveTests
         var freeCreatureRecord = records2[Guid.Parse(RexId)];
         Assert.IsNotNull(freeCreatureRecord, "Free creature cannot be found.");
         
-        var cryoCreature = Creature.Create(cryoCreatureRecord, transform: null, true);
-        var freeCreature = Creature.Create(freeCreatureRecord, transform: null, false);
+        var cryoCreature = Creature.Create(cryoCreatureRecord, transform: null);
+        var freeCreature = Creature.Create(freeCreatureRecord, transform: null);
 
         Assert.IsTrue(cryoCreature.IsInCryo, "Cryo creature should have IsInCryo=true");
         Assert.IsFalse(freeCreature.IsInCryo, "Free creature should have IsInCryo=false");

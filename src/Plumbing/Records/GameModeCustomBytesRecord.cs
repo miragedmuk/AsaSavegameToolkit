@@ -1,3 +1,7 @@
+using AsaSavegameToolkit.Plumbing.Readers;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace AsaSavegameToolkit.Plumbing.Records;
 
 /// <summary>
@@ -11,10 +15,10 @@ public class GameModeCustomBytesRecord
     public int Flags { get; init; }
 
     /// <summary>Tribe entries parsed from the index.</summary>
-    public required List<EmbeddedTribeEntry> Tribes { get; init; }
+    public required List<GameObjectRecord> Tribes { get; init; }
 
     /// <summary>Player profile entries parsed from the index.</summary>
-    public required List<EmbeddedProfileEntry> Profiles { get; init; }
+    public required List<GameObjectRecord> Profiles { get; init; }
 
     /// <summary>
     /// Reads the GameModeCustomBytes record from the archive.
@@ -78,22 +82,22 @@ public class GameModeCustomBytesRecord
 
         var profileCount         = archive.ReadInt32();
         // the minimim size of the profile header is profileCount * 16, so we can do a quick check to avoid seeking to an invalid position later
-        if (profileCount * 16 > archive.Length - profileHeaderPosition)
-        {
-            throw new AsaDataException($"Profile count {profileCount} is too large for the remaining data length {archive.Length - profileHeaderPosition}.");
-        }
+        //if (profileCount * 16 > archive.Length - profileHeaderPosition)
+        //{
+        //    throw new AsaDataException($"Profile count {profileCount} is too large for the remaining data length {archive.Length - profileHeaderPosition}.");
+        //}
 
         // Profile blob data starts right after the 8-byte profile section header
         var profileDataStart = archive.Position;
 
-        archive.Position = profileHeaderPosition;
+        archive.Position = profileHeaderPosition + 4;
         var profileHeaders = new List<ProfileHeaderEntry>(profileCount);
         for (int i = 0; i < profileCount; i++)
         {
             profileHeaders.Add(new ProfileHeaderEntry(
-                EosId:  archive.ReadInt64(),
-                Offset: archive.ReadInt32(),
-                Size:   archive.ReadInt32()
+                EosId: archive.ReadInt64(), 
+                Offset: archive.ReadInt32(),                
+                Size: archive.ReadInt32()
             ));
         }
 
@@ -101,6 +105,7 @@ public class GameModeCustomBytesRecord
         // tribe byte checks get complicated, so lets just cap it at the length of the archive to avoid seeking to an invalid position
         // tribe data has size internally, so we'll just sum and check
         var totalTribeDataSize = tribeHeaders.Sum(hdr => hdr.Size);
+        var diffSize = archive.Length - tribeDataStart;
         if (totalTribeDataSize > archive.Length - tribeDataStart)
         {
             throw new AsaDataException($"Total tribe data size {totalTribeDataSize} is too large for the remaining data length {archive.Length - tribeDataStart}.");
@@ -113,20 +118,32 @@ public class GameModeCustomBytesRecord
             throw new AsaDataException($"Total profile data size {totalProfileDataSize} is too large for the remaining data length {archive.Length - profileDataStart}.");
         }
 
-        var tribes = new List<EmbeddedTribeEntry>(tribeCount);
+
+
+        var tribes = new List<GameObjectRecord>(tribeCount);
         foreach (var hdr in tribeHeaders)
         {
             archive.Position = tribeDataStart + hdr.Offset;
-            var blobBytes = archive.ReadBytes(hdr.Size);
-            tribes.Add(new EmbeddedTribeEntry { TribeId = hdr.TribeId, RawBlob = blobBytes });
+            using var subArchive = new AsaArchive(NullLogger.Instance, archive.ReadBytes(hdr.Size), string.Empty);
+            subArchive.IsArkFile = true;
+            var tribe = ArkTribeRecord.Read(subArchive, Guid.NewGuid());
+
+            tribes.Add(tribe);
         }
 
         // --- Slice profile blobs ---
-        var profiles = new List<EmbeddedProfileEntry>(profileCount);
+        var profiles = new List<GameObjectRecord>(profileCount);
         foreach (var hdr in profileHeaders)
         {
-            var blobBytes = hdr.Size > 0 ? ReadProfileBlob(archive, profileDataStart, hdr) : [];
-            profiles.Add(new EmbeddedProfileEntry { EosId = hdr.EosId, RawBlob = blobBytes });
+            archive.Position = profileDataStart + hdr.Offset;
+            using var subArchive = new AsaArchive(NullLogger.Instance, archive.ReadBytes(hdr.Size), string.Empty);
+            subArchive.IsArkFile = true;
+
+            var profile = ArkProfileRecord.Read(subArchive, Guid.NewGuid());
+
+            profiles.Add(profile);
+
+            //profiles.Add(new EmbeddedProfileEntry { EosId = hdr.EosId, RawBlob = blobBytes });
         }
 
         return new GameModeCustomBytesRecord
