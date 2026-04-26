@@ -135,21 +135,30 @@ public class AsaSaveGame
             r =>
             {
                 ulong playerDataId = 0;
+
                 var myData = r.Value.Properties.Get<StructProperty>("MyData");
                 if (myData != null)
                 {
                     List<Property> properties = (List<Property>)myData.Value;
                     playerDataId = properties.Get<ulong>("PlayerDataID");
+
                 }
                 List<GameObjectRecord> playerComponents = playerComponentRecords.Values.Where(v => v.Properties.Get<ulong>("LinkedPlayerDataID") == playerDataId).ToList();
-
+                
                 var characterRecord = playerComponents.FirstOrDefault(c => !c.IsStatusComponent());
-                var statusRecord = playerComponents.FirstOrDefault(c => c.IsStatusComponent());
-
+                GameObjectRecord? statusRecord = null;
 
                 ActorTransform? actorLocation = null;
                 if (characterRecord != null)
+                {
                     actorLocation = transforms.TryGetValue(characterRecord.Uuid, out var t) ? t : null;
+
+                    var statusRefProperty = (ObjectReference)characterRecord.Properties.Get<ObjectProperty>("MyCharacterStatusComponent")?.Value;
+
+                    var statusRef = statusRefProperty?.ObjectId;
+                    if (statusRef != null)
+                        statusRecord = statusRecords[statusRef.Value];
+                }
 
                 var player = Player.Create(r.Value, actorLocation);
 

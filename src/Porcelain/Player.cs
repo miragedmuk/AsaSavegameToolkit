@@ -3,9 +3,11 @@ using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
 using Microsoft.VisualBasic;
+using System.Collections;
 using System.Diagnostics;
 using System.Drawing;
 using System.Numerics;
+using System.Threading;
 
 namespace AsaSavegameToolkit.Porcelain;
 
@@ -131,6 +133,30 @@ public class Player
             }
 
 
+
+            List<int> unlockedExplorerNotes = new List<int>();
+            if (persistentConfigProperties.HasAny("PerMapExplorerNoteUnlocks"))
+            {
+                var mapExplorerNotesArray = persistentConfigProperties.Get<ArrayProperty>("PerMapExplorerNoteUnlocks")?.Value;
+                if (mapExplorerNotesArray?.Count > 0)
+                {
+                    for (int i = 0; i < mapExplorerNotesArray.Count; i++)
+                    {
+                        var noteBytes = BitConverter.GetBytes((uint)mapExplorerNotesArray[i]);
+                        BitArray b = new BitArray(noteBytes);
+                        for (int x = 0; x < b.Length; x++)
+                        {
+                            int noteIndex = (i * 32) + x;
+                            if ((b[x]))
+                            {
+                                unlockedExplorerNotes.Add(noteIndex);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            
             List<string> namedExplorerNotesFound = new List<string>();
             var namedExplorerNotesUnlocked = persistentConfigProperties.Get<ArrayProperty>("PerMapNamedExplorerNoteUnlocks")?.Value;
             if (namedExplorerNotesUnlocked != null)
@@ -212,17 +238,6 @@ public class Player
 
         }
 
-
-
-
-
-
-
-
-
-
-
-
         return new Player
         {
             PlayerName = playerName,
@@ -236,18 +251,84 @@ public class Player
 
     internal void IngestStatusRecord(GameObjectRecord statusComponent)
     {
-        var playerLevel = 1;
-        if (statusComponent != null)
+        //in-game status is often newer than the last profile save.
+        var properties = statusComponent.Properties;
+
+        var experiencePoints = properties.Get<float>("ExperiencePoints");
+        var playerLevel = 0;        
+        for (int i = 0; i < 12; i++)
         {
-            for (int i = 0; i < 12; i++)
-            {
-                playerLevel += statusComponent.Properties.Get<byte>($"NumberOfLevelUpPointsApplied", i);
-            }
+            playerLevel += properties.Get<byte>($"NumberOfLevelUpPointsApplied", i);
+        }
+
+        float[] currentStatusValues = new float[12];
+        for (int i = 0; i < currentStatusValues.Length; i++)
+        {
+            currentStatusValues[i] = properties.Get<float>("CurrentStatusValues", i);
+        }
+    
+        sbyte[] currentStatusStates = new sbyte[12];
+        for (int i = 0; i < currentStatusStates.Length; i++)
+        {
+            currentStatusStates[i] = properties.Get<sbyte>("CurrentStatusStates", i);
         }
     }
 
     internal void IngestCharacterRecord(GameObjectRecord characterComponent)
     {
+        var properties = characterComponent.Properties;
+
+        var playeName = properties.Get<string>("PlayerName");
+        var platformProfileName = properties.Get<string>("PlatformProfileName");
+
+        //PlatformProfileID
+        var platformProfileIdProperty = (FUniqueNetIdRepl)properties.Get<StructProperty>("PlatformProfileID")?.Value;
+        var platformProfileId = Convert.ToHexString(platformProfileIdProperty.Id);
+
+        //BodyColors
+        Color[] bodyColors = new Color[3];
+        for (int i = 0; i < bodyColors.Length; i++)
+        {
+            var bodyColorStruct = (FLinearColor?)properties.Get<StructProperty>("BodyColors", i)?.Value;
+            if (bodyColorStruct != null)
+            {
+                bodyColors[i] = Color.FromArgb(
+                    (int)(bodyColorStruct.Value.A * 255),
+                    (int)(bodyColorStruct.Value.R * 255),
+                    (int)(bodyColorStruct.Value.G * 255),
+                    (int)(bodyColorStruct.Value.B * 255));
+            }
+            else
+            {
+                bodyColors[i] = Color.Empty;
+            }
+        }
+        //OriginalHairColor
+        var originalHairColor = Color.Black;
+        var hairColorStruct = (FLinearColor?)properties.Get<StructProperty>("OriginalHairColor")?.Value;
+        if (hairColorStruct != null)
+        {
+            originalHairColor = Color.FromArgb(
+                (int)(hairColorStruct.Value.A * 255),
+                (int)(hairColorStruct.Value.R * 255),
+                (int)(hairColorStruct.Value.G * 255),
+                (int)(hairColorStruct.Value.B * 255));
+        }
+
+        var currentWeapon = properties.Get<ObjectProperty>("CurrentWeapon")?.Value?.ObjectId;
+        var savedLastTimeHadController = properties.Get<double>("SavedLastTimeHadController");
+        var linkedPlayerDataId = properties.Get<ulong>("LinkedPlayerDataID");
+        var percentOfFullHeadHairGrowth = properties.Get<float>("PercentOfFullHeadHairGrowth");
+        var facialHairStyle= properties.Get<float>("FacrialHairIndex");
+        var headHairStyle = properties.Get<float>("HeadHairIndex");
+        var tribeName = properties.Get<string>("TribeName");
+        var targetingTeam = properties.Get<int>("TargetingTeam");
+        var originalCreationTime = properties.Get<double>("OriginalCreationTime");
+
+
+
+
+
 
     }
 
