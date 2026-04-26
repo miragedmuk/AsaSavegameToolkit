@@ -28,17 +28,12 @@ public class Creature
     /// Unique dino identifier. 
     /// forms the globally-unique dino ID used in-game.
     /// </summary>
-    public uint? DinoId { get; set; }
+    public long? DinoId { get; set; }
 
     /// <summary>
     /// True if this creature is tamed.
     /// </summary>
     public bool IsTamed { get; set; }
-
-    /// <summary>
-    /// True if this creature is stored in a cryopod.
-    /// </summary>
-    public bool IsInCryo { get; set; }
 
     /// <summary>
     /// True if this creature is female.
@@ -84,8 +79,6 @@ public class Creature
 
     public string[]? Traits { get; set; } = [];
 
-    public string[]? Rigs { get; set; } = [];
-
 
     /// <summary>
     /// Color region indices (up to 6 regions, indexed 0-5).
@@ -103,23 +96,22 @@ public class Creature
 
     public FQuat? Rotation { get; private set; }
 
-    public Inventory? Inventory { get; internal set; }
+    public bool IsCryo { get; set; } = false;
+    public bool IsNeutered { get; set; } = false;
+    public float Scale { get; set; } = 1;
 
 
 
 
     // Tamed info
+    public Inventory? Inventory { get; internal set; }
 
     public long FatherId { get; set; } = 0;
     public string FatherName { get; set; } = string.Empty;
     public long MotherId { get; set; } = 0;
     public string MotherName { get; set; } = string.Empty;
     public bool IsClaimed { get; set; } = true;
-    public bool IsCryo { get; set; } = false;
-
-
-
-
+    
     /// <summary>
     /// The player-given tame name (e.g., "Fluffy"). Null if not tamed or unnamed.
     /// </summary>
@@ -129,6 +121,8 @@ public class Creature
     /// <summary>
     /// The name of the tribe that owns this creature. Null if untamed.
     /// </summary>
+    /// 
+
     public string? TribeName { get; set; }
 
     /// <summary>
@@ -169,6 +163,7 @@ public class Creature
 
     public double? UploadedTime { get; set; }
 
+
     public override string ToString()
     {
         var name = TamedName ?? ClassName;
@@ -182,85 +177,143 @@ public class Creature
     /// </summary>
     public static Creature Create(GameObjectRecord actor, ActorTransform? transform)
     {
+        if (!actor.IsCreature())
+            throw new AsaSavegameToolkit.Plumbing.AsaDataException($"Gameobject {actor.Uuid} is cannot be parsed as a Creature.");
+      
         var properties = actor.Properties;
 
-        var dinoId = long.Parse(string.Concat(properties.Get<uint>("DinoID1", 0), properties.Get<uint>("DinoID2", 0)));
+        //read base properties common for wild and tamed
+        var dinoId = long.Parse(string.Concat(properties.Get<uint>("DinoID1", 0), properties.Get<uint>("DinoID2", 0)));       
         bool isInCryo = properties.Get<bool>("IsStored");
-        var mutationsMale = properties.Get<int>("RandomMutationsMale");
-        var mutationsFemale = properties.Get<int>("RandomMutationsFemale");
-        var baseLevel = actor.GetBaseLevel();
-        var extraCharacterLevel = properties.Get<int>("ExtraCharacterLevel");
-        var colorRegions = new byte?[12];
-        if (properties.TryGet<IList>("ColorSetIndices", out var arrayElements))
+        var colorRegions = new byte[12];
+        for(int i = 0; i < colorRegions.Length; i++)
         {
-            foreach(var element in arrayElements.OfType<ByteProperty>())
+            colorRegions[i] = properties.Get<byte>($"ColorSetIndices", i);
+        }
+        List<string> geneTraits = new List<string>();
+        var geneTraitsArray = properties.Get<ArrayProperty>("GeneTraits");
+        if(geneTraitsArray!=null && geneTraitsArray.Value.Count > 0)
+        {
+            foreach(var geneTraitValue in geneTraitsArray.Value)
             {
-                colorRegions[element.Tag.ArrayIndex] = element.Value;
+                geneTraits.Add(geneTraitValue.ToString());
             }
         }
+        bool isFemale = properties.Get<bool>("bIsFemale");
+        bool isJuvenile = properties.Get<bool>("bBabyInitialized");
+        float babyAge = properties.Get<float>("BabyAge");
+        int targetingTeam = properties.Get<int>("TargetingTeam");
+        var originalCreationTime = properties.Get<double>("OriginalCreationTime");
+        var wildScale = properties.Get<float>("WildRandomScale");
+
+        //return wild
+        if (!TeamInfo.IsTamed(targetingTeam))
+        {
+            return new CreatureWild
+            {
+                Id = actor.Uuid,
+                ClassName = actor.GetClassName(),
+                IsCryo = isInCryo,
+                IsFemale = isFemale,
+                BabyAge = babyAge,
+                IsJuvenile = isJuvenile,
+                DinoId = dinoId,
+                ColorRegions = colorRegions,
+                Location = transform?.Location,
+                Rotation = transform?.Rotation
+            };
+        }
+
+        var tamedName = properties.Get<string>("TamedName");
+        var tamedTimestamp = properties.Get<string>("TamedTimeStamp");
+        var imprinterName = properties.Get<string>("ImprinterName");
+        var uploadedFromServer = properties.Get<string>("UploadedFromServerName");
+        var tamedOnServer = properties.Get<string>("TamedOnServerName");
+        var imprintClassName = properties.Get<ObjectProperty>("BabyCuddleFood")?.Value?.Path;
+        var lastTameConsumedFoodTime = properties.Get<double>("LastTameConsumedFoodTime");        
+        var tamedAtTime = properties.Get<double>("TamedAtTime");
+        var tamedAggressionLevel = properties.Get<int>("TamedAggressionLevel");
+        var enableTamedMating = properties.Get<bool>("bEnableTamedMating");
+        var tribeName = properties.Get<string>("TribeName");
+        var isNeutered = properties.Get<bool>("bNeutered");
 
 
-        var creature = new Creature
+        //tamed
+        return new CreatureTamed
         {
             Id = actor.Uuid,
             ClassName = actor.GetClassName(),
-            IsInCryo = isInCryo,
-            TamedName = properties.Get<string>("TamedName"),
-            TribeName = properties.Get<string>("TribeName"),
-            TamerString = properties.Get<string>("TamerString"),
-            IsTamed = actor.IsTamed(),
-            IsFemale = properties.Get<bool>("bIsFemale"),
-            BaseLevel = baseLevel,
-            TotalLevel = actor.GetFullLevel(),
-            MutationsMale = mutationsMale,
-            MutationsFemale = mutationsFemale,
-            TotalMutations = mutationsMale + mutationsFemale,
-            ImprintQuality = properties.Get<float>("ImprintQuality"),
-            ImprinterName = properties.Get<string>("ImprinterName"),
-            BabyAge = properties.TryGet<float>("BabyAge", out var babyAge) ? babyAge : null,
-            IsJuvenile = properties.Get<bool>("bBabyInitialized"),
-            TamedAtTime = properties.TryGet<double>("TamedAtTime", out var tamedAtTime) ? tamedAtTime : null,
-            DinoId = properties.TryGet<uint>("DinoID1", out var dinoId1) ? dinoId1 : null,
-            ColorRegions = [],
+            IsTamed=true,
+            IsCryo = isInCryo,
+            IsFemale = isFemale,
+            BabyAge = babyAge,
+            IsJuvenile = isJuvenile,
+            DinoId = dinoId,
+            ColorRegions = colorRegions,
             Location = transform?.Location,
             Rotation = transform?.Rotation
         };
 
-        var statusComponent = actor.GetCharacterStatusComponent();
-        if (statusComponent != null)
-        {
-            creature.IngestStatusRecord(statusComponent);
-        }
-
-        return creature;
     }
 
-    private void IngestInventoryRecord(GameObjectRecord inventoryComponent)
+    internal void IngestInventory(Inventory inventory)
     {
-        throw new NotImplementedException();
-    }
-
-    private static T?[] GetStatValues<T>(GameObjectRecord statusComponent, string propertyName, int count) where T : struct
-    {
-        var levels = new T?[count];
-        for (var i = 0; i < count; i++)
-        {
-            if (statusComponent.Properties.TryGet<T>(propertyName, i, out var level))
-            {
-                levels[i] = level;
-            }
-        }
-        return levels;
+        Inventory = inventory;
     }
 
     internal void IngestStatusRecord(GameObjectRecord statusComponent)
     {
+        var properties = statusComponent.Properties;
+     
+        //wild
+        var baseLevel = properties.Get<int>("BaseCharacterLevel");
+        var extraLevels = properties.Get<int>("ExtraCharacterLevel");
+
+        var wildLevels = 1;
+        byte[] wildStats = new byte[12];
+        for(int i = 0; i < wildStats.Length; i++)
+        {
+            wildStats[i] = properties.Get<byte>("NumberOfLevelUpPointsApplied", i);
+            wildLevels += wildStats[i];
+        }
 
 
+        float[] currentStatusValues = new float[12];
+        for(int i = 0; i < currentStatusValues.Length; i++)
+        {
+            currentStatusValues[i] = properties.Get<float>("CurrentStatusValues", i);
+        }
+
+
+        //tamed
+        var randomMutationsMale = properties.Get<int>("RandomMutationsMale");
+        var randomMutationsFemale = properties.Get<int>("RandomMutationsFemale");
+        var imprintQuality = properties.Get<float>("DinoImprintQuality");
+        var experiencePoints = properties.Get<float>("ExperiencePoints");
+
+        var tameLevels = 0;
+        byte[] tameStats = new byte[12];
+        for (int i = 0; i < tameStats.Length; i++)
+        {
+            tameStats[i] = properties.Get<byte>("NumberOfLevelUpPointsAppliedTamed", i);
+            tameLevels += tameStats[i];
+        }
+
+        var tameMutations = 0;
+        byte[] mutationStats = new byte[12];
+        for (int i = 0; i < mutationStats.Length; i++)
+        {
+            mutationStats[i] = properties.Get<byte>("NumberOfMutationsAppliedTamed", i);
+            tameMutations += mutationStats[i];
+        }
+
+
+
+
+
+        BaseLevel = baseLevel ;
+        TotalLevel = wildLevels + tameLevels;
+        TotalMutations = tameMutations + randomMutationsMale + randomMutationsFemale;
     }
 
-    internal void IngestInventoryRecord(GameObjectRecord inventoryComponent, IDictionary<Guid, Item> inventoryItems)
-    {
-        Inventory = Inventory.Create(inventoryComponent, inventoryItems);
-    }
 }

@@ -20,28 +20,28 @@ public class AsaSaveGame
     public required IDictionary<Guid, Tribe> Tribes { get; set; }
     public required IDictionary<Guid, Creature> WildCreatures { get; set; }
     public required IDictionary<Guid, Creature> TamedCreatures { get; set; }
-    /// <summary>Creatures currently stored in cryopods. These are not live world objects.</summary>
-    public required IDictionary<Guid, Creature> CryopoddedCreatures { get; set; }
     public required IDictionary<Guid, Structure> Structures { get; set; }
     public required IDictionary<Guid, Item> DroppedItems { get; set; }
 
     public static AsaSaveGame ReadFrom(string path, ILogger? logger = null, AsaReaderSettings? settings = null, CancellationToken cancellationToken = default)
     {
         logger ??= NullLogger.Instance;
-        
+
         using var reader = new AsaSaveReader(path, logger, settings ?? AsaReaderSettings.None);
 
         var header = reader.ReadSaveHeader(cancellationToken);
         var gameObjects = reader.ReadGameRecords(cancellationToken);
         var transforms = reader.ReadActorTransforms(cancellationToken).Transforms;
-        var customBytes = reader.ReadGameModeCustomBytes(cancellationToken);
 
         var creatureRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
-        var cryoRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
-        var droppedItemRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var statusRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var inventoryRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+
+        var droppedItemRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();     
         var inventoryItemRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+
         var tribeRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
-        var profileRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();  
+        var profileRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
         var playerComponentRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
         var structureRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
         var deathCacheRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
@@ -75,7 +75,7 @@ public class AsaSaveGame
                         gameObject.Names[0]);
                 }
 
-                    continue;
+                continue;
             }
 
             // The component names are in deepest-first order, so crawl from the back of the list forward down the component stack
@@ -90,24 +90,24 @@ public class AsaSaveGame
         recordsByName = null!;
 
 
-        var sheep = gameObjects.Values.Where(f => f.Names.Count > 1 && f.Names[1] == "Sheep_Character_BP_C_2147152454").ToList();
-
         // Third Pass: now that we've nested all the components, we can categorize the top level game objects by type
         Parallel.ForEach(gameObjects.Values, gameObject =>
         //foreach (var gameObject in gameObjects.Values)
         {
-            if (gameObject.IsCreature() && !gameObject.Properties.HasAny("IsStored"))
+            if (gameObject.IsCreature())
                 creatureRecords[gameObject.Uuid] = gameObject;
-            else if (gameObject.Properties.HasAny("IsStored"))
-                cryoRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsTribe())
                 tribeRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsProfile())
                 profileRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsPlayerComponent())
                 playerComponentRecords[gameObject.Uuid] = gameObject;
+            else if (gameObject.IsStatusComponent())
+                statusRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsStructure())
                 structureRecords[gameObject.Uuid] = gameObject;
+            else if (gameObject.IsInventory())
+                inventoryRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsInventoryItem())
                 inventoryItemRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsDeathItemCache())
@@ -120,7 +120,7 @@ public class AsaSaveGame
                 unknownRecords[gameObject.Uuid] = gameObject;
         });
 
-        
+
         // The full record dictionaries are no longer needed now that every object has been
         // placed into a typed bucket. Release them so the GC can collect the raw
         // GameObjectRecord graph before we begin allocating the Porcelain objects.
@@ -131,8 +131,8 @@ public class AsaSaveGame
             r => Structure.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null));
 
         var players = profileRecords.ToDictionary(
-            r => r.Key, 
-            r => 
+            r => r.Key,
+            r =>
             {
                 ulong playerDataId = 0;
                 var myData = r.Value.Properties.Get<StructProperty>("MyData");
@@ -141,13 +141,25 @@ public class AsaSaveGame
                     List<Property> properties = (List<Property>)myData.Value;
                     playerDataId = properties.Get<ulong>("PlayerDataID");
                 }
-                GameObjectRecord? playerComponents = playerComponentRecords.Values.FirstOrDefault(v => v.Properties.Get<ulong>("LinkedPlayerDataID") == playerDataId);
-                
-                ActorTransform? actorLocation = null;
-                if(playerComponents!=null)
-                    actorLocation = transforms.TryGetValue(playerComponents.Uuid, out var t) ? t : null;
+                List<GameObjectRecord> playerComponents = playerComponentRecords.Values.Where(v => v.Properties.Get<ulong>("LinkedPlayerDataID") == playerDataId).ToList();
 
-                return Player.Create(r.Value, playerComponents, actorLocation);
+                var characterRecord = playerComponents.FirstOrDefault(c => !c.IsStatusComponent());
+                var statusRecord = playerComponents.FirstOrDefault(c => c.IsStatusComponent());
+
+
+                ActorTransform? actorLocation = null;
+                if (characterRecord != null)
+                    actorLocation = transforms.TryGetValue(characterRecord.Uuid, out var t) ? t : null;
+
+                var player = Player.Create(r.Value, actorLocation);
+
+                if (characterRecord != null)
+                    player.IngestCharacterRecord(characterRecord);
+
+                if (statusRecord != null)
+                    player.IngestStatusRecord(statusRecord);
+
+                return player;
             });
 
 
@@ -160,12 +172,27 @@ public class AsaSaveGame
 
         var creatures = creatureRecords.ToDictionary(
             r => r.Key,
-            r => Creature.Create(r.Value,transforms.TryGetValue(r.Key, out var t) ? t : null));
+            r => {
+                var creature = Creature.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null);
+                var statusComponentRef = (ObjectReference?)r.Value.Properties.Get<ObjectProperty>("MyCharacterStatusComponent")?.Value;
+                if (statusComponentRef != null)
+                {
+                    if (statusRecords.ContainsKey(statusComponentRef.ObjectId))
+                    {
+                        var statusComponent = statusRecords[statusComponentRef.ObjectId];
+                        creature.IngestStatusRecord(statusComponent);
+                    }
+                }
+
+                var inventoryComponentRef = (ObjectReference?)r.Value.Properties.Get<ObjectProperty>("MyInventoryComponent")?.Value;
+                if (inventoryComponentRef != null)
+                {
 
 
-        var cryoCreatures = cryoRecords.ToDictionary(
-        r => r.Key,
-        r => Creature.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null) );
+                }
+
+                return creature;
+            });
 
 
         var droppedItems = droppedItemRecords.ToDictionary(
@@ -179,7 +206,6 @@ public class AsaSaveGame
 
 
         var tamedCreatures = creatures.Values.Where(c => c.IsTamed).ToDictionary(x => x.Id);
-
         var wildCreatures = creatures.Values.Where(c => !c.IsTamed).ToDictionary(x => x.Id);
 
 
@@ -190,7 +216,6 @@ public class AsaSaveGame
             Tribes = tribes,
             TamedCreatures = tamedCreatures,
             WildCreatures = wildCreatures,
-            CryopoddedCreatures = cryoCreatures,
             Structures = structures,
             DroppedItems = droppedItems,
         }; 

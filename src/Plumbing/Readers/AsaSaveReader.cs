@@ -8,8 +8,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.ComponentModel.Design;
 using System.Diagnostics;
 using System.Numerics;
+using System.Reflection.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -147,28 +149,40 @@ public class AsaSaveReader : IDisposable
             }
 
             var parsedGameRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+            var parsedNameLookup = new ConcurrentDictionary<string, Guid>();
 
 
-            Parallel.ForEach(gameRows, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, gameRow =>
+            if (_settings.ReadGameObjects || _settings.ReadCryoObjects)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var (objectId, objectBytes) = gameRow;
+                //cryo objects are stored inside gameobject so need to load if either is enabled to ensure we have all the data for parsing. 
+                Parallel.ForEach(gameRows, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, gameRow =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var (objectId, objectBytes) = gameRow;
 
-                try
-                {
-                    var gameRecord = ParseGameRecord(objectId, objectBytes, saveHeader);
-                    parsedGameRecords.AddOrUpdate(objectId, gameRecord, (_, _) =>
+                    try
                     {
-                        _logger.LogWarning("Replacing game object with guid {Guid}. This may indicate duplicate entries in the database or a collision. Returning the new object.", objectId);
-                        return gameRecord;
-                    });
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to parse game object {ObjectId}", objectId);
-                    throw new AsaDataException($"Failed to parse game object {objectId} in {_saveFile}", ex);
-                }
-            });
+                        var gameRecord = ParseGameRecord(objectId, objectBytes, saveHeader);
+                        parsedGameRecords.AddOrUpdate(objectId, gameRecord, (_, _) =>
+                        {
+                            _logger.LogWarning("Replacing game object with guid {Guid}. This may indicate duplicate entries in the database or a collision. Returning the new object.", objectId);
+                            return gameRecord;
+                        });
+
+                        parsedNameLookup.AddOrUpdate(gameRecord.Name, objectId, (_, _) =>
+                        {
+                            _logger.LogWarning("Duplicate game object name {Name} found for guid {Guid}. This may indicate duplicate entries in the database or a collision. Returning the first object.", gameRecord.Name, objectId);
+                            return objectId;
+                        });
+
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to parse game object {ObjectId}", objectId);
+                        throw new AsaDataException($"Failed to parse game object {objectId} in {_saveFile}", ex);
+                    }
+                });
+            }
 
             // Release all raw byte arrays now that parsing is complete.
             // This allows the GC to collect the raw SQL bytes before the result dict is
@@ -177,6 +191,9 @@ public class AsaSaveReader : IDisposable
 
             if (_settings.ReadCryoObjects)
             {
+
+
+
                 using CryopodReader cryoReader = new CryopodReader(_logger, _settings);
                 foreach (var cryopod in parsedGameRecords.Values.Where(r => r.HasCryoCreature()))
                 {
@@ -188,36 +205,50 @@ public class AsaSaveReader : IDisposable
 
                     if (cryoRecordSets.Count == 0)
                     {
+                        _logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} does not contain any data", cryopod.Names[0], cryopod.Uuid);
+                        continue;
+                    }
+
+                    var creatureRecord = cryoRecordSets.SelectMany(g => g).FirstOrDefault(r => r.IsCreature());
+                    if (creatureRecord == null)
+                    {
                         _logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} does not contain any creature data", cryopod.Names[0], cryopod.Uuid);
                         continue;
                     }
 
-                    if (cryoRecordSets.Count > 1)
+                    var inventoryRecord = parsedGameRecords[creatureRecord.Properties.Get<ObjectProperty>("CryoContainer").Value.ObjectId];
+                    var containerProperty = creatureRecord.Properties.Get<ObjectProperty>("CryoContainer");
+                    if (inventoryRecord.Names.Count == 1)
                     {
-                        _logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} contains more than one set of data", cryopod.Names[0], cryopod.Uuid);
-                    }
 
-                    // Nest status components under their parent dino so Creature.Create() can read stat levels.
-                    // Normally, a creature's equipped saddle still appears in its inventory with an IsEquipped property set.
-                    // In the cryopod, there is no inventory component and the saddle is in its own record. To make them more
-                    // like normal creatures, we'll wrap the saddle in an inventory component and attach that to the creature.
+                    }
+                    if(inventoryRecord.Names.Count > 1)
+                    {
+                        
+                        var parentComponentUuid = parsedNameLookup[inventoryRecord.Names[1]];
+                        var parentComponent = parsedGameRecords[parentComponentUuid];
+                        if (parentComponent != null)
+                        {
+                            var containerId = parentComponent.Uuid;
+                            creatureRecord.Properties.Remove(containerProperty);
+                            creatureRecord.Properties.Add(new ObjectProperty() { 
+                                Tag  = containerProperty.Tag,
+                                Value = new Primitives.ObjectReference()
+                                {
+                                    IsPath=false,
+                                    ObjectId = containerId
+                                }
+                            
+                            });
+
+                        }
+                        
+                            
+                    }
 
                     foreach (var cryoRecords in cryoRecordSets)
                     {
-                        var dinoRecords = cryoRecords.Where(r => r.IsCreature()).ToArray();
-                        if (dinoRecords.Length > 1)
-                        {
-                            _logger.LogWarning("Cryopod parsing returned more than one dino object");
-                        }
-
-                        var dinoRecord = dinoRecords.FirstOrDefault();
-                        if (dinoRecord == null)
-                        {
-                            _logger.LogWarning("Cryopod parsing returned no dino records");
-                            continue;
-                        }
-
-                        foreach(var cryoObject in cryoRecords)
+                        foreach (var cryoObject in cryoRecords)
                         {
                             parsedGameRecords.AddOrUpdate(cryoObject.Uuid, cryoObject, (_, _) =>
                             {
@@ -229,52 +260,149 @@ public class AsaSaveReader : IDisposable
                 }
             }
 
-            if (_settings.ReadArkTribeFiles)
+
+            if (_settings.ReadArkTribeFiles || _settings.ReadArkProfileFiles)
             {
-                using ArkTribeReader tribeReader = new ArkTribeReader(_logger,_settings);
-                var tribeObjects = tribeReader.Read(_saveDirectory, cancellationToken);
-
-                Parallel.ForEach(tribeObjects, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, tribeGameObject =>
+                GameModeCustomBytesRecord? customBytes = null;
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    parsedGameRecords.AddOrUpdate(tribeGameObject.Uuid, tribeGameObject, (_, _) =>
-                    {
-                        _logger.LogWarning("Replacing game object with guid {Guid} from tribe files. This may indicate duplicate entries in the database or a collision. Returning the new object.", tribeGameObject.Uuid);
-                        return tribeGameObject;
-                    });
-                }
-                );
-            }
-
-            if (_settings.ReadArkProfileFiles)
-            {
-                using ArkProfileReader profileReader = new ArkProfileReader(_logger, _settings);
-                var profileObjects = profileReader.Read(_saveDirectory, cancellationToken);
-
-                Parallel.ForEach(profileObjects, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, profileGameObject =>
+                    customBytes = ReadGameModeCustomBytes(cancellationToken);
+                }catch (Exception ex)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    parsedGameRecords.AddOrUpdate(profileGameObject.Uuid, profileGameObject, (_, _) =>
-                    {
-                        _logger.LogWarning("Replacing game object with guid {Guid} from profile files. This may indicate duplicate entries in the database or a collision. Returning the new object.", profileGameObject.Uuid);
-                        return profileGameObject;
-                    });
+                    _logger.LogError(ex, "Failed to read GameModeCustomBytes. This may impact parsing of tribe and profile data.");
                 }
-                );
-            }
+
+                if (_settings.ReadArkTribeFiles)
+                {
+                    var tribeObjects = ParseTribes(cancellationToken, customBytes);
+                    if(tribeObjects.Count > 0)
+                    {
+                        Parallel.ForEach(tribeObjects, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, tribeGameObject =>
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            parsedGameRecords.AddOrUpdate(tribeGameObject.Key, tribeGameObject.Value, (_, _) =>
+                            {
+                                _logger.LogWarning("Replacing game object with guid {Guid} from tribe files. This may indicate duplicate entries in the database or a collision. Returning the new object.", tribeGameObject.Key);
+                                return tribeGameObject.Value;
+                            });
+                        }
+                        );
+                    }                                       
+                }
+
+                if (_settings.ReadArkProfileFiles)
+                {
+                    var profileObjects = ParseProfiles(cancellationToken, customBytes);
+                    if (profileObjects.Count > 0)
+                    {
+                        Parallel.ForEach(profileObjects, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, profileGameObject =>
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            parsedGameRecords.AddOrUpdate(profileGameObject.Key, profileGameObject.Value, (_, _) =>
+                            {
+                                _logger.LogWarning("Replacing game object with guid {Guid} from profile files. This may indicate duplicate entries in the database or a collision. Returning the new object.", profileGameObject.Key);
+                                return profileGameObject.Value;
+                            });
+                        }
+                        );
+                    }
+                }
+            }                       
 
             StringPool.Shared.Reset();
 
-            if (!_settings.UseCache)
-                return parsedGameRecords;
 
             // Assign the ConcurrentDictionary directly — ConcurrentDictionary implements
             // IReadOnlyDictionary, so no .ToDictionary() copy is needed.
             _cachedGameRecords = parsedGameRecords;
         }
         return _cachedGameRecords;
+    }
+
+    private ConcurrentDictionary<Guid, GameObjectRecord> ParseProfiles(CancellationToken cancellationToken, GameModeCustomBytesRecord? customBytes)
+    {
+        ConcurrentDictionary<Guid, GameObjectRecord> profileRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+
+        if (customBytes != null && customBytes.Profiles.Count > 0)
+        {
+            Parallel.ForEach(customBytes.Profiles, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, profileContainer =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                using var subArchive = new AsaArchive(NullLogger.Instance, profileContainer.RawBlob, string.Empty);
+                subArchive.IsArkFile = true;
+                var profile = ArkProfileRecord.Read(subArchive, Guid.NewGuid());
+                profileRecords.AddOrUpdate(profile.Uuid, profile, (_, _) =>
+                {
+                    _logger.LogWarning("Replacing game object with guid {Guid} from profile files. This may indicate duplicate entries in the database or a collision. Returning the new object.", profile.Uuid);
+                    return profile;
+                });
+            }
+            );
+        }
+        else
+        {
+            using ArkProfileReader profileReader = new ArkProfileReader(_logger, _settings);
+            var profileObjects = profileReader.Read(_saveDirectory, cancellationToken);
+
+            Parallel.ForEach(profileObjects, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, profileGameObject =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                profileRecords.AddOrUpdate(profileGameObject.Uuid, profileGameObject, (_, _) =>
+                {
+                    _logger.LogWarning("Replacing game object with guid {Guid} from profile files. This may indicate duplicate entries in the database or a collision. Returning the new object.", profileGameObject.Uuid);
+                    return profileGameObject;
+                });
+            }
+            );
+        }
+
+        return profileRecords;
+    }
+
+    private ConcurrentDictionary<Guid, GameObjectRecord> ParseTribes(CancellationToken cancellationToken, GameModeCustomBytesRecord? customBytes)
+    {
+        ConcurrentDictionary<Guid, GameObjectRecord> tribeRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        //first attempt to read from GameModeCustomBytes
+        if ( customBytes!=null && customBytes.Tribes.Count > 0)
+        {
+            Parallel.ForEach(customBytes.Tribes, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, tribeContainer =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                using var subArchive = new AsaArchive(NullLogger.Instance, tribeContainer.RawBlob, string.Empty);
+                subArchive.IsArkFile = true;
+                var tribe = ArkTribeRecord.Read(subArchive, Guid.NewGuid());
+
+                tribeRecords.AddOrUpdate(tribe.Uuid, tribe, (_, _) =>
+                {
+                    _logger.LogWarning("Replacing game object with guid {Guid} from tribe files. This may indicate duplicate entries in the database or a collision. Returning the new object.", tribe.Uuid);
+                    return tribe;
+                });
+            }
+            );
+        }
+        else
+        {
+            //attempt to parse from external .arktribe if not found in GameModeCustomBytes.
+            using ArkTribeReader tribeReader = new ArkTribeReader(_logger, _settings);
+            var tribeObjects = tribeReader.Read(_saveDirectory, cancellationToken);
+
+            Parallel.ForEach(tribeObjects, new ParallelOptions { MaxDegreeOfParallelism = _settings.MaxCores }, tribeGameObject =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                tribeRecords.AddOrUpdate(tribeGameObject.Uuid, tribeGameObject, (_, _) =>
+                {
+                    _logger.LogWarning("Replacing game object with guid {Guid} from tribe files. This may indicate duplicate entries in the database or a collision. Returning the new object.", tribeGameObject.Uuid);
+                    return tribeGameObject;
+                });
+            }
+            );
+        }
+
+        return tribeRecords;
     }
 
     public GameObjectRecord ReadGameRecord(Guid objectId, CancellationToken cancellationToken = default)

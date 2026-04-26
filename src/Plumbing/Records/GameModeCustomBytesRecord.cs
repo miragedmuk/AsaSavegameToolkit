@@ -15,10 +15,10 @@ public class GameModeCustomBytesRecord
     public int Flags { get; init; }
 
     /// <summary>Tribe entries parsed from the index.</summary>
-    public required List<GameObjectRecord> Tribes { get; init; }
+    public required List<EmbeddedTribeEntry> Tribes { get; init; }
 
     /// <summary>Player profile entries parsed from the index.</summary>
-    public required List<GameObjectRecord> Profiles { get; init; }
+    public required List<EmbeddedProfileEntry> Profiles { get; init; }
 
     /// <summary>
     /// Reads the GameModeCustomBytes record from the archive.
@@ -90,12 +90,14 @@ public class GameModeCustomBytesRecord
         // Profile blob data starts right after the 8-byte profile section header
         var profileDataStart = archive.Position;
 
-        archive.Position = profileHeaderPosition + 4;
+        archive.Position = profileHeaderPosition;
+        var someInt = archive.ReadInt32();
+
         var profileHeaders = new List<ProfileHeaderEntry>(profileCount);
         for (int i = 0; i < profileCount; i++)
         {
             profileHeaders.Add(new ProfileHeaderEntry(
-                EosId: archive.ReadInt64(), 
+                EntryId: archive.ReadUInt64(), 
                 Offset: archive.ReadInt32(),                
                 Size: archive.ReadInt32()
             ));
@@ -119,32 +121,35 @@ public class GameModeCustomBytesRecord
         }
 
 
-
-        var tribes = new List<GameObjectRecord>(tribeCount);
+        List<EmbeddedTribeEntry> tribes = new List<EmbeddedTribeEntry>();
         foreach (var hdr in tribeHeaders)
         {
-            archive.Position = tribeDataStart + hdr.Offset;
-            using var subArchive = new AsaArchive(NullLogger.Instance, archive.ReadBytes(hdr.Size), string.Empty);
-            subArchive.IsArkFile = true;
-            var tribe = ArkTribeRecord.Read(subArchive, Guid.NewGuid());
+            if (hdr.TribeId == 0) continue; // deleted tribe entry, skip
 
-            tribes.Add(tribe);
+            archive.Position = tribeDataStart + hdr.Offset;
+            
+            tribes.Add(new EmbeddedTribeEntry()
+            {
+                TribeId = hdr.TribeId,
+                RawBlob = archive.ReadBytes(hdr.Size)
+            });
         }
+
 
         // --- Slice profile blobs ---
-        var profiles = new List<GameObjectRecord>(profileCount);
+        List<EmbeddedProfileEntry> profiles = new List<EmbeddedProfileEntry>();
         foreach (var hdr in profileHeaders)
         {
+            if (hdr.EntryId == 0) continue; // deleted profile entry, skip
+
             archive.Position = profileDataStart + hdr.Offset;
-            using var subArchive = new AsaArchive(NullLogger.Instance, archive.ReadBytes(hdr.Size), string.Empty);
-            subArchive.IsArkFile = true;
-
-            var profile = ArkProfileRecord.Read(subArchive, Guid.NewGuid());
-
-            profiles.Add(profile);
-
-            //profiles.Add(new EmbeddedProfileEntry { EosId = hdr.EosId, RawBlob = blobBytes });
+            profiles.Add(new EmbeddedProfileEntry()
+            {
+                EosId = (long)hdr.EntryId,
+                RawBlob = archive.ReadBytes(hdr.Size)
+            });
         }
+
 
         return new GameModeCustomBytesRecord
         {
@@ -154,17 +159,10 @@ public class GameModeCustomBytesRecord
         };
     }
 
-    private static byte[] ReadProfileBlob(Readers.AsaArchive archive, long profileDataStart, ProfileHeaderEntry hdr)
-    {
-        archive.Position = profileDataStart + hdr.Offset;
-        return archive.ReadBytes(hdr.Size);
-    }
 
     private readonly record struct TribeHeaderEntry(uint TribeId, int Unknown, int Offset, int Size);
-    private readonly record struct ProfileHeaderEntry(long EosId, int Offset, int Size);
+    private readonly record struct ProfileHeaderEntry(ulong EntryId, int Offset, int Size);
 }
-
-/// <summary>A tribe blob sliced from the GameModeCustomBytes record.</summary>
 public class EmbeddedTribeEntry
 {
     /// <summary>Unique tribe identifier.</summary>

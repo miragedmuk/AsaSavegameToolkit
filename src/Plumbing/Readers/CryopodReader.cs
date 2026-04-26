@@ -161,6 +161,31 @@ public sealed class CryopodReader : IDisposable
         var dinoComponent = cryoGameObjects.FirstOrDefault(r => r.IsCreature());
         if (dinoComponent != null)
         {
+            Guid containerId = cryoPod.Uuid;
+
+            if (cryoPod.Properties.HasAny("OwnerInventory"))
+            {
+                containerId = cryoPod.Properties.Get<ObjectProperty>("OwnerInventory").Value.ObjectId;                
+            }
+
+            //save reference to pod/container for actor transform lookup
+            dinoComponent.Properties.Add(new ObjectProperty()
+            {
+                Tag = new PropertyTag()
+                {
+                    Name = new FName(0, 0, "CryoContainer"),
+                    Type = FPropertyTypeName.Create(new FName(0, 0, "ObjectProperty")),
+                    Size = 16,
+                    ArrayIndex = 0,
+                    Flags = 0
+                },
+                Value = new ObjectReference()
+                {
+                    IsPath = false,
+                    ObjectId = containerId
+                }
+            });
+
             var statusComponent = cryoGameObjects.FirstOrDefault(r => r.IsStatusComponent());
             if (statusComponent != null)
             {
@@ -180,13 +205,10 @@ public sealed class CryopodReader : IDisposable
                 }           
             }
 
-
-
-
             var inventoryItemRecords = cryoGameObjects.Where(r=>r.Properties.HasAny("OwnerInventory")).ToList(); 
             if(inventoryItemRecords!=null && inventoryItemRecords.Count > 0)
             {
-                var containerId = Guid.NewGuid();
+                var inventoryContainerId = Guid.NewGuid();
 
                 List<ObjectReference> itemReferences = new List<ObjectReference>();
 
@@ -196,7 +218,7 @@ public sealed class CryopodReader : IDisposable
                     ownerInventoryRef.Value = new ObjectReference()
                     {
                         IsPath = false,
-                        ObjectId = containerId
+                        ObjectId = inventoryContainerId
                     };
 
 
@@ -236,7 +258,7 @@ public sealed class CryopodReader : IDisposable
                 {
                     Tag = new PropertyTag()
                     {
-                        Name = new FName(0, 0, "Items"),
+                        Name = new FName(0, 0, "InventoryItems"),
                         Type = FPropertyTypeName.Create(new FName(0, 0, "ArrayProperty"), new FName(0, 0, "ObjectReference")),
                         Size = 1,
                         ArrayIndex = 0,
@@ -248,8 +270,8 @@ public sealed class CryopodReader : IDisposable
                 containerProperties.Add(itemsProperty);
 
                 GameObjectRecord containerObject = new GameObjectRecord(
-                    containerId,
-                    new FName(0, 0, $"PrimalItemInventoryBP_{containerId.ToString()}"),
+                    inventoryContainerId,
+                    new FName(0, 0, $"PrimalItemInventoryBP_{inventoryContainerId.ToString()}"),
                     containerNames,
                     containerProperties,
                     dataFileIndex: 0,
@@ -271,7 +293,7 @@ public sealed class CryopodReader : IDisposable
                     Value = new ObjectReference()
                     {
                         IsPath = false,
-                        ObjectId = containerId
+                        ObjectId = inventoryContainerId
                     }
                 });
 

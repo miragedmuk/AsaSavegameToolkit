@@ -1,5 +1,7 @@
-﻿using AsaSavegameToolkit.Plumbing.Readers;
+﻿using AsaSavegameToolkit.Plumbing.Properties;
+using AsaSavegameToolkit.Plumbing.Readers;
 using AsaSavegameToolkit.Plumbing.Records;
+using AsaSavegameToolkit.Plumbing.Utilities;
 using AsaSavegameToolkit.Porcelain;
 using AsaSavegameToolkit.Tests.Helpers;
 using System;
@@ -26,6 +28,7 @@ namespace AsaSavegameToolkit.Tests.Plumbing.Readers
             using var reader = new AsaSaveReader(saveFile, TestContext.GetLogger());
             var records = reader.ReadGameRecords(TestContext.CancellationToken);
             var tribes = records.Values.Where(r=>r.IsTribe()).ToList();
+            
             Assert.IsGreaterThan(0, tribes.Count);  
 
         }
