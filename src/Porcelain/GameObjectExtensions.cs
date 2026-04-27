@@ -79,6 +79,11 @@ public static class GameObjectExtensions
         return gameObject.Properties.HasAny("OwnerInventory");
     }
 
+    public static bool IsItem(this GameObjectRecord gameObject)
+    {
+        return gameObject.Properties.HasAny("ItemID");
+    }
+
     public static bool IsInventory(this GameObjectRecord gameObject)
     {
         return gameObject.Properties.HasAny("bInitializedMe");

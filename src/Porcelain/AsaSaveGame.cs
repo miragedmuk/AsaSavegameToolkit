@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Data;
 using System.Threading;
 using System.Threading.Tasks;
 using AsaSavegameToolkit.Plumbing.Primitives;
@@ -21,7 +22,7 @@ public class AsaSaveGame
     public required IDictionary<Guid, Creature> WildCreatures { get; set; }
     public required IDictionary<Guid, Creature> TamedCreatures { get; set; }
     public required IDictionary<Guid, Structure> Structures { get; set; }
-    public required IDictionary<Guid, Item> DroppedItems { get; set; }
+    public required IDictionary<Guid, DroppedItem> DroppedItems { get; set; }
 
     public static AsaSaveGame ReadFrom(string path, ILogger? logger = null, AsaReaderSettings? settings = null, CancellationToken cancellationToken = default)
     {
@@ -38,7 +39,7 @@ public class AsaSaveGame
         var inventoryRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
 
         var droppedItemRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();     
-        var inventoryItemRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
+        var itemRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
 
         var tribeRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
         var profileRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
@@ -108,8 +109,8 @@ public class AsaSaveGame
                 structureRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsInventory())
                 inventoryRecords[gameObject.Uuid] = gameObject;
-            else if (gameObject.IsInventoryItem())
-                inventoryItemRecords[gameObject.Uuid] = gameObject;
+            else if (gameObject.IsItem())
+                itemRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsDeathItemCache())
                 deathCacheRecords[gameObject.Uuid] = gameObject;
             else if (gameObject.IsDroppedItem() || (gameObject.ObjectType == ObjectTypeFlags.Item && transforms.ContainsKey(gameObject.Uuid)))
@@ -163,10 +164,43 @@ public class AsaSaveGame
                 var player = Player.Create(r.Value, actorLocation);
 
                 if (characterRecord != null)
+                {
                     player.IngestCharacterRecord(characterRecord);
 
+                    var inventoryComponentRef = (ObjectReference?)characterRecord.Properties.Get<ObjectProperty>("MyInventoryComponent")?.Value;
+                    if (inventoryComponentRef != null)
+                    {
+                        var inventoryRecord = inventoryRecords[inventoryComponentRef.ObjectId];
+
+                        Inventory inventory = new Inventory();
+                        List<Item> items = new List<Item>();
+
+                        //InventoryItems
+                        var inventoryItems = inventoryRecord.Properties.Get<ArrayProperty>("InventoryItems")?.Value;
+                        if (inventoryItems != null && inventoryItems.Count > 0)
+                        {
+                            foreach (ObjectReference itemReference in inventoryItems)
+                            {
+                                if (itemReference.ObjectId == Guid.Empty)
+                                {
+                                    continue; //skip empty slots
+                                }
+                                var itemRecord = itemRecords[itemReference.ObjectId];
+                                var item = Item.Create(itemRecord);
+                                items.Add(item);
+                            }
+                        }
+
+                        if (items.Count > 0)
+                        {
+                            inventory.Items = items;
+                            player.IngestInventory(inventory);
+                        }                            
+                    }
+                }
                 if (statusRecord != null)
                     player.IngestStatusRecord(statusRecord);
+
 
                 return player;
             });
@@ -178,6 +212,7 @@ public class AsaSaveGame
         {
             return Tribe.Create(r.Value);
         });
+
 
         var creatures = creatureRecords.ToDictionary(
             r => r.Key,
@@ -196,23 +231,92 @@ public class AsaSaveGame
                 var inventoryComponentRef = (ObjectReference?)r.Value.Properties.Get<ObjectProperty>("MyInventoryComponent")?.Value;
                 if (inventoryComponentRef != null)
                 {
+                    var inventoryRecord = inventoryRecords[inventoryComponentRef.ObjectId];
+                    Inventory inventory = new Inventory();
+                    List<Item> items = new List<Item>();
 
 
+                    //InventoryItems
+                    var inventoryItems = inventoryRecord.Properties.Get<ArrayProperty>("InventoryItems")?.Value;
+                    if (inventoryItems != null && inventoryItems.Count > 0)
+                    {
+                        foreach (ObjectReference itemReference in inventoryItems)
+                        {
+                            if (itemReference.ObjectId == Guid.Empty)
+                            {
+                                continue; //skip empty slots
+                            }
+                            var itemRecord = itemRecords[itemReference.ObjectId];
+                            var item = Item.Create(itemRecord);
+                            items.Add(item);
+                        }
+                    }
+
+                    //EquippedItems
+                    var equippedSlots = inventoryRecord.Properties.Get<ArrayProperty>("EquippedItems")?.Value;
+                    if (equippedSlots != null && equippedSlots.Count > 0)
+                    {
+                        foreach (ObjectReference itemReference in equippedSlots)
+                        {
+                            if (itemReference.ObjectId == Guid.Empty)
+                            {
+                                continue; //skip empty slots
+                            }
+                            var itemRecord = itemRecords[itemReference.ObjectId];
+                            var item = Item.Create(itemRecord);
+                            items.Add(item);
+                        }
+                    }
+
+
+                    //ItemSlots
+                    var itemSlots = inventoryRecord.Properties.Get<ArrayProperty>("ItemSlots")?.Value;
+                    if (itemSlots != null && itemSlots.Count > 0)
+                    {
+                        foreach (ObjectReference itemReference in itemSlots)
+                        {
+                            if (itemReference.ObjectId == Guid.Empty)
+                            {
+                                continue; //skip empty slots
+                            }
+                            var itemRecord = itemRecords[itemReference.ObjectId];
+                            var item = Item.Create(itemRecord);
+                            items.Add(item);
+                        }
+                    }
+
+                    if (items.Count > 0)
+                    {
+                        inventory.Items = items;
+                        creature.IngestInventory(inventory);
+                    }
                 }
 
                 return creature;
             });
 
-
+   
+        
         var droppedItems = droppedItemRecords.ToDictionary(
             r => r.Key,
-            r => Item.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null));
+            r => 
+            {
+                ActorTransform? itemLocation = transforms.TryGetValue(r.Key, out var t) ? t : null;
+                GameObjectRecord itemRecord = r.Value;
+                
+                var droppedItem = DroppedItem.Create(itemRecord, itemLocation);
 
-        var inventoryItems = inventoryItemRecords.ToDictionary(
-            r => r.Key,
-            r => Item.Create(r.Value));
+                var myObjectRef = (ObjectReference?)r.Value.Properties.Get<ObjectProperty>("MyItem")?.Value;
+                if (myObjectRef != null)
+                {
+                    var referencedObject = itemRecords[myObjectRef.ObjectId];
+                    var referencedItem = Item.Create(referencedObject);
+                    droppedItem.IngestItem(referencedItem);
+                }
 
+                return droppedItem;
 
+            });
 
         var tamedCreatures = creatures.Values.Where(c => c.IsTamed).ToDictionary(x => x.Id);
         var wildCreatures = creatures.Values.Where(c => !c.IsTamed).ToDictionary(x => x.Id);

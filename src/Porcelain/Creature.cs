@@ -151,9 +151,9 @@ public class Creature
     public double? TamedAtTime { get; set; }
     public double? LastAllyInRangeTime { get; set; }
 
-    public byte?[] TamedStats { get; set; } = [];
+    public byte[] TamedStats { get; set; } = new byte[12];
 
-    public byte?[] TamedMutations { get; set; } = [];
+    public byte[] TamedMutations { get; set; } = new byte[12];
 
     public int RandomMutationsMale { get; set; } = 0;
     public int RandomMutationsFemale { get; set; } = 0;
@@ -201,6 +201,7 @@ public class Creature
         }
         bool isFemale = properties.Get<bool>("bIsFemale");
         bool isJuvenile = properties.Get<bool>("bBabyInitialized");
+        bool isTameable = properties.Get<bool>("bForceDisablingTaming") == false;
         float babyAge = properties.Get<float>("BabyAge");
         int targetingTeam = properties.Get<int>("TargetingTeam");
         var originalCreationTime = properties.Get<double>("OriginalCreationTime");
@@ -219,6 +220,9 @@ public class Creature
                 IsJuvenile = isJuvenile,
                 DinoId = dinoId,
                 ColorRegions = colorRegions,
+                Scale = wildScale,
+                TribeId = targetingTeam,
+                Traits = geneTraits.ToArray(),
                 Location = transform?.Location,
                 Rotation = transform?.Rotation
             };
@@ -226,6 +230,7 @@ public class Creature
 
         var tamedName = properties.Get<string>("TamedName");
         var tamedTimestamp = properties.Get<string>("TamedTimeStamp");
+        var imprintNetId = properties.Get<string>("ImprinterPlayerUniqueNetId");
         var imprinterName = properties.Get<string>("ImprinterName");
         var uploadedFromServer = properties.Get<string>("UploadedFromServerName");
         var tamedOnServer = properties.Get<string>("TamedOnServerName");
@@ -233,10 +238,43 @@ public class Creature
         var lastTameConsumedFoodTime = properties.Get<double>("LastTameConsumedFoodTime");        
         var tamedAtTime = properties.Get<double>("TamedAtTime");
         var tamedAggressionLevel = properties.Get<int>("TamedAggressionLevel");
-        var enableTamedMating = properties.Get<bool>("bEnableTamedMating");
+        var isMating = properties.Get<bool>("bEnableTamedMating");
+        var isWandering = properties.Get<bool>("bEnableTamedWandering");
         var tribeName = properties.Get<string>("TribeName");
         var isNeutered = properties.Get<bool>("bNeutered");
+        var isClone = properties.Get<bool>("bIsClone");
 
+        var femaleAncestorsProperty = properties.Get<ArrayProperty>("DinoAncestors")?.Value;
+        if(femaleAncestorsProperty != null)
+        {
+            for(int i = 0; i < femaleAncestorsProperty.Count; i++)
+            {
+                List<Property> propertyList = femaleAncestorsProperty[i] as List<Property>;
+                var maleName = propertyList.Get<string>("MaleName");
+                var maleId1 = propertyList.Get<uint>("MaleDinoID1");
+                var maleId2 = propertyList.Get<uint>("MaleDinoID2");
+                var femaleName = propertyList.Get<string>("FemaleName");
+                var femaleId1 = propertyList.Get<uint>("FemaleDinoID1");
+                var femaleId2 = propertyList.Get<uint>("FemaleDinoID2");
+
+            }
+
+        }
+        var maleAncestorsProperty = properties.Get<ArrayProperty>("DinoAncestorsMale")?.Value;
+        if (maleAncestorsProperty != null)
+        {
+            for (int i = 0; i < maleAncestorsProperty.Count; i++)
+            {
+                List<Property> propertyList = maleAncestorsProperty[i] as List<Property>;
+                var maleName = propertyList.Get<string>("MaleName");
+                var maleId1 = propertyList.Get<uint>("MaleDinoID1");
+                var maleId2 = propertyList.Get<uint>("MaleDinoID2");
+                var femaleName = propertyList.Get<string>("FemaleName");
+                var femaleId1 = propertyList.Get<uint>("FemaleDinoID1");
+                var femaleId2 = propertyList.Get<uint>("FemaleDinoID2");
+
+            }
+        }
 
         //tamed
         return new CreatureTamed
@@ -250,6 +288,13 @@ public class Creature
             IsJuvenile = isJuvenile,
             DinoId = dinoId,
             ColorRegions = colorRegions,
+            Scale = wildScale,
+            TribeId = targetingTeam,
+            Traits = geneTraits.ToArray(),
+            ImprinterName = imprinterName,
+            IsMating = isMating,
+            IsNeutered = isNeutered,
+            TamedName = tamedName,
             Location = transform?.Location,
             Rotation = transform?.Rotation
         };
@@ -307,12 +352,11 @@ public class Creature
             tameMutations += mutationStats[i];
         }
 
-
-
-
-
+        TamedMutations = mutationStats;
         BaseLevel = baseLevel ;
         TotalLevel = wildLevels + tameLevels;
+        MutationsFemale = randomMutationsFemale;
+        MutationsMale = randomMutationsMale;
         TotalMutations = tameMutations + randomMutationsMale + randomMutationsFemale;
     }
 

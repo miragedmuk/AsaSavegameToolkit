@@ -317,10 +317,10 @@ public class CreatureTests : SaveTests
     [TestMethod]
     public void AsaSaveGame_IncludesCryoCreatures()
     {
-        var saveFile = Path.Combine(TestSettings.AssetsDirectory, "version_13/TheIsland_WP.ark");
+        var saveFile = Path.Combine(TestSettings.AssetsDirectory, "version_14/LostColony_WP.ark");
         var saveGame = AsaSaveGame.ReadFrom(saveFile, TestContext.GetLogger(), cancellationToken: TestContext.CancellationToken);
 
-        var cryoCreatures = saveGame.TamedCreatures.Values.Where(c=>c.IsCryo).ToList();
+        var cryoCreatures = saveGame.TamedCreatures.Values.Where(c=>c.IsCryo == true).ToList();
         TestContext.WriteLine($"Found {cryoCreatures.Count} cryo creatures in AsaSaveGame.");
 
         Assert.IsNotEmpty(cryoCreatures, "Expected extracted cryo creatures to be surfaced in AsaSaveGame.");

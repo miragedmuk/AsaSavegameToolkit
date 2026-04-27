@@ -10,11 +10,7 @@ namespace AsaSavegameToolkit.Porcelain;
 /// </summary>
 public class Item
 {
-    /// <summary>
-    /// The underlying raw record for direct property access.
-    /// </summary>
-    public GameObjectRecord? Record { get; set; }
-
+    
     /// <summary>
     /// Unique object ID of this item.
     /// </summary>
@@ -52,15 +48,64 @@ public class Item
 
     internal static Item Create(GameObjectRecord record, ActorTransform? location = default)
     {
+        var properties = record.Properties;
+
+        var className = record.GetClassName();
+
+        var itemIdProperties = (List<Property>?)properties.Get<StructProperty>("ItemID")?.Value;
+        uint itemId1 = 0;
+        uint itemId2 = 0;
+
+        if (itemIdProperties != null)
+        {
+            itemId1 = itemIdProperties.Get<uint>("ItemID1");
+            itemId2 = itemIdProperties.Get<uint>("ItemID2");
+        }
+
+        var creationTime = properties.Get<double>("CreationTime");
+        int itemQuantity = properties.Get<int>("ItemQuantity");
+        if (itemQuantity == 0)
+            itemQuantity = 1;
+        var isBlueprint = properties.Get<bool>("bIsBlueprint");
+        var isEngram = properties.Get<bool>("bIsEngram");
+        var isInitialItem = properties.Get<bool>("bIsInitialItem");
+        var isCustomRecipe= properties.Get<bool>("bIsCustomRecipe");
+        var isFoodRecipe = properties.Get<bool>("bIsFoodRecipe");
+
+
+        var allowRemovalFromInventory = properties.Get<bool>("bAllowRemovalFromInventory");
+        var savedDurability = properties.Get<float>("SavedDurability");
+        var itemDurability = properties.Get<float>("ItemDurability");
+       
+        var itemRating = properties.Get<float>("ItemRating");
+        var itemQualityIndex = properties.Get<byte>("ItemQualityIndex");
+
+        var crafterTribeName = properties.Get<string>("CrafterTribeName");
+        var crafterCharacterName = properties.Get<string>("CrafterCharacterName");
+        var craftingSkill = properties.Get<float>("CraftingSkill");
+        var craftingSkillBonus = properties.Get<float>("CraftedSkillBonus");
+
+        uint[] itemStatValues = new uint[8]; //ItemStatValues //uint16
+        int[] itemColors = new int[6]; //ItemColorID 
+
+        //EggNumberOfLevelUpPointsApplied //byte
+        //EggNumberMutationsApplied //byte
+        //EggColorSetIndices //byte
+        //EggRandomMutationsFemale //int
+        //EggRandomMutationsMale //int
+        //EggGenderOverride //int
+        //EggDinoAncestors
+        //EggDinoAncestorsMale
+        //EggDinoGeneTraits
+
         return new Item
         {
-            Record = record,
             Id = record.Uuid,
-            ClassName = record.GetClassName(),
-            Quantity = record.Properties.TryGet<int>("ItemQuantity", out var qty) ? qty : 1,
-            IsBlueprint = record.Properties.Get<bool>("bIsBlueprint"),
-            Durability = record.Properties.TryGet<float>("SavedDurability", out var dur) ? dur : null,
-            ItemRating = record.Properties.TryGet<float>("ItemRating", out var rating) ? rating : null,
+            ClassName = className,
+            Quantity = itemQuantity,
+            IsBlueprint = isBlueprint,
+            Durability = savedDurability,
+            ItemRating = itemRating,
             Location = location ?? default
         };
     }
@@ -71,7 +116,6 @@ public class Item
 
         return new Item
         {
-            Record = record,
             Id = record.Uuid == default ? Guid.NewGuid() : record.Uuid,
             ClassName = className,
             Quantity = 1,
