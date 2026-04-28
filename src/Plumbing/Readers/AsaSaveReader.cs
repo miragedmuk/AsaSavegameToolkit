@@ -174,7 +174,6 @@ public class AsaSaveReader : IDisposable
                             _logger.LogWarning("Duplicate game object name {Name} found for guid {Guid}. This may indicate duplicate entries in the database or a collision. Returning the first object.", gameRecord.Name, objectId);
                             return objectId;
                         });
-
                     }
                     catch (Exception ex)
                     {
@@ -216,35 +215,48 @@ public class AsaSaveReader : IDisposable
                         continue;
                     }
 
-                    var inventoryRecord = parsedGameRecords[creatureRecord.Properties.Get<ObjectProperty>("CryoContainer").Value.ObjectId];
-                    var containerProperty = creatureRecord.Properties.Get<ObjectProperty>("CryoContainer");
-                    if (inventoryRecord.Names.Count == 1)
-                    {
 
-                    }
-                    if(inventoryRecord.Names.Count > 1)
+                    var containerProperty = creatureRecord.Properties.Get<ObjectProperty?>("CryoContainer");
+                    if(containerProperty!=null)
                     {
-                        
-                        var parentComponentUuid = parsedNameLookup[inventoryRecord.Names[1]];
-                        var parentComponent = parsedGameRecords[parentComponentUuid];
-                        if (parentComponent != null)
+                        var inventoryRecord = parsedGameRecords[containerProperty.Value.ObjectId];
+                        if (inventoryRecord.Names.Count > 1)
                         {
-                            var containerId = parentComponent.Uuid;
-                            creatureRecord.Properties.Remove(containerProperty);
-                            creatureRecord.Properties.Add(new ObjectProperty() { 
-                                Tag  = containerProperty.Tag,
-                                Value = new Primitives.ObjectReference()
+                            var parentComponentUuid = parsedNameLookup[inventoryRecord.Names[1]];
+                            var parentComponent = parsedGameRecords[parentComponentUuid];
+                            if (parentComponent != null)
+                            {
+                                var containerId = parentComponent.Uuid;                               
+
+                                creatureRecord.Properties.Remove(containerProperty);
+                                creatureRecord.Properties.Add(new ObjectProperty()
                                 {
-                                    IsPath=false,
-                                    ObjectId = containerId
+                                    Tag = containerProperty.Tag,
+                                    Value = new Primitives.ObjectReference()
+                                    {
+                                        IsPath = false,
+                                        ObjectId = containerId
+                                    }
+
+                                });
+
+
+                                //re-base the TargetingTeam of cryo creature to the container it now exists in
+                                var creatureTargetingTeamProperty = creatureRecord.Properties.FirstOrDefault(p => p.Tag.Name.ToString() == "TargetingTeam") as IntProperty;
+                                if (creatureTargetingTeamProperty != null)
+                                {
+                                    var parentTargetingTeamValue = parentComponent.Properties.Get<int>("TargetingTeam");
+                                    if (parentTargetingTeamValue != 0 && parentTargetingTeamValue != creatureTargetingTeamProperty.Value)
+                                    {
+                                        creatureTargetingTeamProperty.Value = parentTargetingTeamValue;                                        
+                                    }
                                 }
-                            
-                            });
+                            }
+
 
                         }
-                        
-                            
                     }
+
 
                     foreach (var cryoRecords in cryoRecordSets)
                     {

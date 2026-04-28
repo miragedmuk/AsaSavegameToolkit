@@ -63,6 +63,7 @@ public sealed class CryopodReader : IDisposable
             { 23, "DinoID1" },
             { 24, "UInt32Property" },
             { 25, "DinoID2" },
+            { 26, "UntamedPoopTimeCache"},
             { 31, "UploadedFromServerName" },
             { 32, "TamedOnServerName" },
             { 34, "MyCharacterStatusComponent" },

@@ -100,21 +100,25 @@ public class ObjectReference
 
         if (referenceType == 1)
         {
+            var pathValue = archive.ReadFName();
+
             // Path reference (FName)
             return new ObjectReference
             {
                 IsPath = true,
-                Path = archive.ReadFName()
+                Path = pathValue
             };
         }
         else
         {
-            // GUID reference (most common)
+            var endOfData = archive.ReadInt32();
+
             return new ObjectReference
             {
                 IsPath = false,
-                ObjectId = archive.ReadGuid()
+                ObjectId = Guid.Empty
             };
+
         }
     }
 

@@ -1,7 +1,3 @@
-using System.Collections.Concurrent;
-using System.Data;
-using System.Threading;
-using System.Threading.Tasks;
 using AsaSavegameToolkit.Plumbing.Primitives;
 using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Readers;
@@ -10,6 +6,11 @@ using AsaSavegameToolkit.Plumbing.Utilities;
 using CommunityToolkit.HighPerformance.Buffers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Collections.Concurrent;
+using System.Data;
+using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace AsaSavegameToolkit.Porcelain;
 
@@ -129,7 +130,56 @@ public class AsaSaveGame
 
         var structures = structureRecords.ToDictionary(
             r => r.Key,
-            r => Structure.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null));
+            r => 
+            {
+                var structure = Structure.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null);
+
+                var inventoryComponentRef = (ObjectReference?)r.Value.Properties.Get<ObjectProperty>("MyInventoryComponent")?.Value;
+                if (inventoryComponentRef != null)
+                {
+                    var inventoryRecord = inventoryRecords[inventoryComponentRef.ObjectId];
+
+                    Inventory inventory = new Inventory();
+                    List<Item> items = new List<Item>();
+
+                    //InventoryItems
+                    var inventoryItems = inventoryRecord.Properties.Get<ArrayProperty>("InventoryItems")?.Value;
+                    if (inventoryItems != null && inventoryItems.Count > 0)
+                    {
+                        foreach (ObjectReference itemReference in inventoryItems)
+                        {
+                            if (itemReference.ObjectId == Guid.Empty)
+                            {
+                                continue; //skip empty slots
+                            }
+                            var itemRecord = itemRecords[itemReference.ObjectId];
+                            var item = Item.Create(itemRecord);
+                            items.Add(item);
+                        }
+                    }
+
+                    if (items.Count > 0)
+                    {
+                        inventory.Items = items;
+                        structure.IngestInventory(inventory);
+                    }
+                }
+
+
+                /* Dedicated Storage Inventory */
+                ObjectReference? dedicatedStorageClassReference = r.Value.Properties.Get<ObjectProperty>("SelectedResourceClass")?.Value;
+                if (dedicatedStorageClassReference != null)
+                {
+                    Inventory inventory = new Inventory();
+                    string itemClass = dedicatedStorageClassReference.Value;
+                    int itemQuantity = (int)r.Value.Properties.Get<long>("ResourceCount");
+                    Item item = new Item() { ClassName = itemClass, Id = Guid.NewGuid(), Quantity= itemQuantity};
+                    inventory.Items.Add(item);
+                    structure.IngestInventory(inventory);
+                }
+
+                return structure;
+            });
 
         var players = profileRecords.ToDictionary(
             r => r.Key,

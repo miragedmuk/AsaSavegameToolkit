@@ -18,8 +18,8 @@ public class CreatureTests : SaveTests
     [TestMethod]
     public void CanParseCreatureData()
     {
-        //var saveFile = Path.Combine(TestSettings.AssetsDirectory, "version_14/LostColony_WP_Cryo.ark");
-        var saveFile = @"C:\Users\cyber\Downloads\LostColony_WP\LostColony_WP.ark";
+        var saveFile = Path.Combine(TestSettings.AssetsDirectory, "version_14/LostColony_WP.ark");
+        //var saveFile = @"C:\Users\cyber\Downloads\LostColony_WP\LostColony_WP.ark";
 
 
         using var reader = new AsaSaveReader(saveFile, TestContext.GetLogger());

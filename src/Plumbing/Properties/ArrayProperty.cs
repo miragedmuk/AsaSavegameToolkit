@@ -131,7 +131,7 @@ public class ArrayProperty : Property<IList>
 
         for (int i = 0; i < count; i++)
         {
-            if (archive.IsArkFile)
+            if (archive.IsArkFile || archive.IsCryopod)
             {
                 switch (elementType.TypeName.Name)
                 {
