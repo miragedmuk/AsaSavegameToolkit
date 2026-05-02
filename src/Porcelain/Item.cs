@@ -2,7 +2,6 @@ using AsaSavegameToolkit.Plumbing.Primitives;
 using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
-using System.Security.Principal;
 
 namespace AsaSavegameToolkit.Porcelain;
 
@@ -17,6 +16,8 @@ public class Item
     /// </summary>
     public Guid Id { get; set; }
 
+    public long ItemId { get; set; } = 0;
+
     /// <summary>
     /// The blueprint class name (e.g., "PrimalItem_WeaponSword_C").
     /// </summary>
@@ -25,22 +26,26 @@ public class Item
     /// <summary>
     /// The stack quantity of this item.
     /// </summary>
-    public int Quantity { get; set; }
+    public int Quantity { get; set; } = 1;
 
     /// <summary>
     /// True if this item is a blueprint (not a craftable/usable copy).
     /// </summary>
-    public bool IsBlueprint { get; set; }
-
+    public bool IsBlueprint { get; set; } = false;
+    public bool IsEngram { get; set; } = false;
+    public bool IsRecipe { get; set; } = false;
     /// <summary>
     /// Remaining durability as a fraction from 0.0 to 1.0.
     /// </summary>
-    public float? Durability { get; set; }
+    public float Durability { get; set; } = 0;
 
     /// <summary>
     /// Item quality from 0.0 (primitive) to higher values (ascendant).
     /// </summary>
-    public float? ItemRating { get; set; }
+    public float ItemRating { get; set; } = 0;
+
+    public byte[] BaseStats { get; set; } = [];
+    public int[] Colors { get; set; } = [];
 
     /// <summary>
     ///
@@ -53,7 +58,7 @@ public class Item
 
         var className = record.GetClassName();
 
-        if (properties?.Count == 0)
+        if (properties == null || properties.Count == 0)
         {
             return new Item
 
@@ -68,9 +73,28 @@ public class Item
             };
         }
 
+        if (properties.HasAny("EggNumberOfLevelUpPointsApplied"))
+        {
+            int eggLevel = 0;
+            for (int i = 0; i < 12; i++)
+            {
+                eggLevel+=properties.Get<byte>("EggNumberOfLevelUpPointsApplied",i);
+            }
+
+            if(eggLevel>0)
+                return FertileEggItem.Create(record, location);
+        }
+
+        //crafted items
+        var crafterTribeName = properties.Get<string>("CrafterTribeName") ?? "";
+        var crafterCharacterName = properties.Get<string>("CrafterCharacterName") ?? "";
+        if (crafterTribeName.Length > 0 || crafterCharacterName.Length > 0)
+            return CraftedItem.Create(record, location);
+
+
+        //all other items
         uint itemId1 = 0;
-        uint itemId2 = 0;
-        double creationTime = 0;    
+        uint itemId2 = 0; 
         int itemQuantity = 1;
         bool isBlueprint = false;
         bool isEngram = false;
@@ -78,120 +102,77 @@ public class Item
         bool isCustomRecipe = false;
         bool isFoodRecipe = false;
         bool allowRemovalFromInventory = false;
-        float savedDurability = 0;
-        float itemDurability = 0;
+        float savedDurability = 0;        
         float itemRating = 0;
         byte itemQualityIndex = 0;
-        string crafterTribeName = "";
-        string crafterCharacterName = "";
-        float craftingSkill = 0;
-        float craftingSkillBonus = 0;
         string customItemName = string.Empty;
         string customItemDescription = string.Empty;
-        uint[] itemStatValues = new uint[8];
         int[] itemColors = new int[6];
 
+        
+        // Start of basic item data
         var itemIdProperties = (List<Property>?)properties.Get<StructProperty>("ItemID")?.Value;
         if (itemIdProperties != null)
         {
             itemId1 = itemIdProperties.Get<uint>("ItemID1");
             itemId2 = itemIdProperties.Get<uint>("ItemID2");
         }
+        var itemId = long.Parse($"{itemId1}{itemId2}");
 
-        creationTime = properties.Get<double>("CreationTime");
+
         itemQuantity = properties.Get<int>("ItemQuantity");
         if (itemQuantity == 0)
             itemQuantity = 1;
 
+
         isBlueprint = properties.Get<bool>("bIsBlueprint");
         isEngram = properties.Get<bool>("bIsEngram");
-        isInitialItem = properties.Get<bool>("bIsInitialItem");
         isCustomRecipe = properties.Get<bool>("bIsCustomRecipe");
         isFoodRecipe = properties.Get<bool>("bIsFoodRecipe");
-
+        isInitialItem = properties.Get<bool>("bIsInitialItem");
         allowRemovalFromInventory = properties.Get<bool>("bAllowRemovalFromInventory");
-        savedDurability = properties.Get<float>("SavedDurability");
-        itemDurability = properties.Get<float>("ItemDurability");
+        // End of basic item data
 
-        itemRating = properties.Get<float>("ItemRating");
+
+        //saddles/structures/armor/tools/weapons etc.
+        savedDurability = properties.Get<float>("SavedDurability"); 
+        itemRating = properties.Get<float>("ItemRating");       
         itemQualityIndex = properties.Get<byte>("ItemQualityIndex");
-
-        crafterTribeName = properties.Get<string>("CrafterTribeName");
-        crafterCharacterName = properties.Get<string>("CrafterCharacterName");
-        craftingSkill = properties.Get<float>("CraftingSkill");
-        craftingSkillBonus = properties.Get<float>("CraftedSkillBonus");
-
-        customItemName = properties.Get<string>("CustomItemName")??"";
-        customItemName = properties.Get<string>("CustomItemDescription")??"";
 
 
         //ItemStatValues //uint16
-        for(int i = 0; i<itemStatValues.Length; i++)
+        byte[] baseStatValues = new byte[8];
+        for (int i = 0; i<baseStatValues.Length; i++)
         {
-            itemStatValues[i] = properties.Get<uint>($"ItemStatValues",i);
+            baseStatValues[i] =  (byte)properties.Get<uint>("ItemStatValues",i);
         }
+
 
         //ItemColorID //int
-        for(int i = 0; i<itemColors.Length; i++)
+        if (properties.HasAny("ItemColorID"))
         {
-            itemColors[i] = properties.Get<int>($"ItemColors",i);
+            for (int i = 0; i < itemColors.Length; i++)
+            {
+                itemColors[i] = properties.Get<short>("ItemColorID", i);
+            }
         }
-
-        //EggNumberOfLevelUpPointsApplied //byte
-        byte[] eggStats = new byte[12];
-        int eggLevel = 0;
-        for(int i = 0; i < 12; i++)
-        {
-            eggStats[i] = properties.Get<byte>($"EggNumberOfLevelUpPointsApplied",i);
-            eggLevel+= eggStats[i];
-        }
-        if(eggLevel > 0)
-        {
-            //we have a fertile egg
-            eggLevel++;
-
-            //EggNumberMutationsApplied //byte
-            //EggColorSetIndices //byte
-            //EggRandomMutationsFemale //int
-            //EggRandomMutationsMale //int
-            //EggGenderOverride //int
-            //EggDinoAncestors
-            //EggDinoAncestorsMale
-            //EggDinoGeneTraits
-        }
-
-
 
         return new Item
-
         {
             Id = record.Uuid,
             ClassName = className,
+            ItemId = itemId,
             Quantity = itemQuantity,
             IsBlueprint = isBlueprint,
+            IsEngram = isEngram,
+            IsRecipe = isCustomRecipe || isFoodRecipe,
             Durability = savedDurability,
             ItemRating = itemRating,
+            BaseStats = baseStatValues,
+            Colors = itemColors,
             Location = location ?? default
         };
     }
-
-    internal static Item FromCryoSaddle(GameObjectRecord record)
-    {
-        var className = record.Properties.TryGet<ObjectReference>("ItemArchetype", out var archetype) ? archetype.Value : "Unknown Saddle";
-
-        return new Item
-        {
-            Id = record.Uuid == default ? Guid.NewGuid() : record.Uuid,
-            ClassName = className,
-            Quantity = 1,
-            IsBlueprint = false,
-            Durability = record.Properties.TryGet<float>("ItemDurability", out var dur) ? dur : null,
-            ItemRating = record.Properties.TryGet<float>("ItemRating", out var rating) ? rating : null,
-            Location = default
-        };
-    }
-
-    // TODO: expose crafting stats, custom name once property interpretation (2.2) is implemented.
 
     public override string ToString()
     {

@@ -368,8 +368,8 @@ public class AsaSaveGame
 
             });
 
-        var tamedCreatures = creatures.Values.Where(c => c.IsTamed).ToDictionary(x => x.Id);
-        var wildCreatures = creatures.Values.Where(c => !c.IsTamed).ToDictionary(x => x.Id);
+        var tamedCreatures = creatures.Values.Where(c => c is CreatureTamed).ToDictionary(x => x.Id);
+        var wildCreatures = creatures.Values.Where(c => c is CreatureWild).ToDictionary(x => x.Id);
 
 
         return new AsaSaveGame

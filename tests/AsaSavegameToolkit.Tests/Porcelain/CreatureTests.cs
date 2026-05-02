@@ -263,24 +263,28 @@ public class CreatureTests : SaveTests
         // Validate all accessors return without throwing
         _ = creature.Id;
         _ = creature.ClassName;
-        _ = creature.IsTamed;
         _ = creature.IsFemale;
-        _ = creature.TamedName;
-        _ = creature.TribeName;
-        _ = creature.TamerString;
         _ = creature.BaseLevel;
         _ = creature.TotalLevel;
         _ = creature.MutationsMale;
         _ = creature.MutationsFemale;
         _ = creature.TotalMutations;
-        _ = creature.ImprintQuality;
-        _ = creature.ImprinterName;
         _ = creature.BabyAge;
         _ = creature.IsJuvenile;
-        _ = creature.TamedAtTime;
         _ = creature.DinoId;
         _ = creature.ColorRegions;
         _ = creature.ToString();
+
+        if(creature is CreatureTamed tamed)
+        {
+            _ = tamed.TamedName;
+            _ = tamed.TribeName;
+            _ = tamed.TamerString;
+            _ = tamed.ImprintQuality;
+            _ = tamed.ImprinterName;
+            _ = tamed.TamedAtTime;
+        }
+
     }
 
     [TestMethod]
@@ -294,24 +298,27 @@ public class CreatureTests : SaveTests
 
         _ = creature.Id;
         _ = creature.ClassName;
-        _ = creature.IsTamed;
         _ = creature.IsFemale;
-        _ = creature.TamedName;
-        _ = creature.TribeName;
-        _ = creature.TamerString;
         _ = creature.BaseLevel;
         _ = creature.TotalLevel;
         _ = creature.MutationsMale;
         _ = creature.MutationsFemale;
         _ = creature.TotalMutations;
-        _ = creature.ImprintQuality;
-        _ = creature.ImprinterName;
         _ = creature.BabyAge;
         _ = creature.IsJuvenile;
-        _ = creature.TamedAtTime;
         _ = creature.DinoId;
         _ = creature.ColorRegions;
         _ = creature.ToString();
+
+        if(creature is CreatureTamed tamed)
+        {
+            _ = tamed.TamedName;
+            _ = tamed.TribeName;
+            _ = tamed.TamerString;
+            _ = tamed.ImprintQuality;
+            _ = tamed.ImprinterName;
+            _ = tamed.TamedAtTime;
+        }
     }
 
     [TestMethod]
@@ -325,7 +332,7 @@ public class CreatureTests : SaveTests
 
         Assert.IsNotEmpty(cryoCreatures, "Expected extracted cryo creatures to be surfaced in AsaSaveGame.");
 
-        foreach (var c in cryoCreatures)
+        foreach (var c in cryoCreatures.OfType<CreatureTamed>())
         {
             TestContext.WriteLine($"  {c.ClassName} '{c.TamedName}' lv={c.TotalLevel} tribe={c.TribeName} isInCryo={c.IsCryo}");
             Assert.IsTrue(c.IsCryo, $"Cryo creature {c.Id} should have IsInCryo=true");
