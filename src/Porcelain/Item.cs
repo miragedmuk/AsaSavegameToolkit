@@ -2,6 +2,7 @@ using AsaSavegameToolkit.Plumbing.Primitives;
 using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
+using System.Runtime.InteropServices;
 
 namespace AsaSavegameToolkit.Porcelain;
 
@@ -34,6 +35,7 @@ public class Item
     public bool IsBlueprint { get; set; } = false;
     public bool IsEngram { get; set; } = false;
     public bool IsRecipe { get; set; } = false;
+    public bool IsInitialItem { get; set; } = false;
     /// <summary>
     /// Remaining durability as a fraction from 0.0 to 1.0.
     /// </summary>
@@ -157,6 +159,7 @@ public class Item
             }
         }
 
+
         return new Item
         {
             Id = record.Uuid,
@@ -166,6 +169,7 @@ public class Item
             IsBlueprint = isBlueprint,
             IsEngram = isEngram,
             IsRecipe = isCustomRecipe || isFoodRecipe,
+            IsInitialItem = isInitialItem,            
             Durability = savedDurability,
             ItemRating = itemRating,
             BaseStats = baseStatValues,

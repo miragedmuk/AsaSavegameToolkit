@@ -7,6 +7,7 @@ using System.Collections;
 using System.Diagnostics;
 using System.Drawing;
 using System.Numerics;
+using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Threading;
 
@@ -43,8 +44,7 @@ public class Player
     public string? TribeName { get; set; }
     public string? UniqueNetId { get; set; }
     public string? SaveNetworkAddress { get; set; }
-    public double? LoginTime { get; set; }
-    public double? LastLoginTime { get; set; }
+    
     public int NumOfDeaths { get; set; }
     public int SpawnDayNumber { get; set; }
     public float SpawnDayTime { get; set; }
@@ -65,8 +65,19 @@ public class Player
     public Dictionary<string, float> CurrentMilestones { get; set; } = new Dictionary<string, float>();
     public List<string> CompletedMilestones { get; set; } = new List<string>();
     public Color[] BodyColors { get; set; } = new Color[3];
-    public double? OriginalCreationTime { get; set; } 
+    
 
+    public double? OriginalCreationGameTime { get; set; }
+    internal double? LoginGameTime { get; set; }
+    internal double? LastLoginGameTime { get; set; }
+
+    public DateTime? OriginalCreationTimestamp { get; set; }
+    public DateTime? LoginTimestamp { get; set; }
+    public DateTime? LastLoginTimestamp { get; set; }
+
+
+
+    public string Gender { get; set; } = "Male";
     public Inventory? Inventory { get; set; }
 
     /// <summary>
@@ -250,11 +261,16 @@ public class Player
                 var bodyColorStruct = (FLinearColor?)persistentStatusProperties.Get<StructProperty>("BodyColors", i)?.Value;
                 if (bodyColorStruct != null)
                 {
+                    var a = bodyColorStruct.Value.A > 1? 1: bodyColorStruct.Value.A;
+                    var r = bodyColorStruct.Value.R > 1 ? 1 : bodyColorStruct.Value.R;
+                    var g = bodyColorStruct.Value.G > 1 ? 1 : bodyColorStruct.Value.G;
+                    var b = bodyColorStruct.Value.B > 1 ? 1 : bodyColorStruct.Value.B;
+
                     bodyColors[i] = Color.FromArgb(
-                        (int)(bodyColorStruct.Value.A * 255),
-                        (int)(bodyColorStruct.Value.R * 255),
-                        (int)(bodyColorStruct.Value.G * 255),
-                        (int)(bodyColorStruct.Value.B * 255));
+                        (int)(a * 255),
+                        (int)(r * 255),
+                        (int)(g * 255),
+                        (int)(b * 255));
                 }
                 else
                 {
@@ -284,8 +300,8 @@ public class Player
             ExplorerNotesFound = unlockedExplorerNotes,
             NamedExplorerNotesFound = namedExplorerNotesFound,
             HeardVoiceOvers = heardVoices,
-            LastLoginTime = lastLoginTime,
-            LoginTime = loginTime,
+            LastLoginGameTime = lastLoginTime,
+            LoginGameTime = loginTime,
             NumOfDeaths = (int)numOfDeaths,
             PercentageOfFacialHairGrowth = facialHairGrowth,
             PercentageOfHeadHairGrowth = headHairGrowth,
@@ -341,6 +357,11 @@ public class Player
         var platformProfileName = properties.Get<string>("PlatformProfileName");
         PlayerName = platformProfileName;
 
+        if (characterComponent.GetClassName().Contains("Female"))
+        {
+            Gender = "Female";
+        }
+
         //PlatformProfileID
         var platformProfileIdProperty = (FUniqueNetIdRepl)properties.Get<StructProperty>("PlatformProfileID")?.Value;
         var platformProfileId = Convert.ToHexString(platformProfileIdProperty.Id);
@@ -368,7 +389,7 @@ public class Player
 
 
         var savedLastTimeHadController = properties.Get<double>("SavedLastTimeHadController");
-        LastLoginTime = savedLastTimeHadController;
+        LastLoginGameTime = savedLastTimeHadController;
 
         var linkedPlayerDataId = properties.Get<ulong>("LinkedPlayerDataID");
         PlayerDataId = (long)linkedPlayerDataId;
@@ -383,7 +404,7 @@ public class Player
         TribeId = targetingTeam;
 
         var originalCreationTime = properties.Get<double>("OriginalCreationTime");
-        OriginalCreationTime = originalCreationTime;
+        OriginalCreationGameTime = originalCreationTime;
 
 
     }
@@ -391,5 +412,21 @@ public class Player
     internal void IngestInventory(Inventory inventory)
     {
         Inventory = inventory;
+    }
+
+    internal void RefreshTimestamps(DateTime saveTimestamp, double gameTime)
+    {
+        if (OriginalCreationGameTime != null)
+        {
+            OriginalCreationTimestamp = saveTimestamp.AddSeconds(OriginalCreationGameTime.Value - gameTime);
+        }
+        if (LoginGameTime != null)
+        {
+            LoginTimestamp = saveTimestamp.AddSeconds(LoginGameTime.Value - gameTime);
+        }
+        if (LastLoginGameTime != null)
+        {
+            LastLoginTimestamp = saveTimestamp.AddSeconds(LastLoginGameTime.Value - gameTime);
+        }
     }
 }

@@ -483,8 +483,8 @@ public sealed class CryopodReader : IDisposable
                 {
                     SaveVersion = (short)version,
                     AllowDynamicNameTable = true,
-                    IsArkFile  = true,
-                    IsCryopod = true
+                    IsCryopod = true,
+                    IsArkFile=true
                 };
 
                 var archiveType = testArchive.ReadInt32();
@@ -542,6 +542,8 @@ public sealed class CryopodReader : IDisposable
                     );
                     results.Add(itemObject);
                 }
+
+                
             }
         }
 

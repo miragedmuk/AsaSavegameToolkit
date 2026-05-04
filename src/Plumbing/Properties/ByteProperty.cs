@@ -13,58 +13,7 @@ public class ByteProperty : Property<byte>
 {
     public static Property Read(Readers.AsaArchive archive, PropertyTag tag)
     {
-        if (archive.IsArkFile)
-        {
-            if (tag.Size == 1)
-            {
-                var currentPos = archive.Position;
-                archive.Position -= 1;
-                var byteType = archive.ReadByte();
-                if (byteType == 0)
-                {
-                    var byteValue = archive.ReadByte();
-                    return new ByteProperty
-                    {
-                        Tag = tag,
-                        Value = byteValue
-                    };
-                }
-                else
-                {
-                    var intEnumValue = archive.ReadInt32();
-                    _ = archive.ReadByte();
-
-                    return new ByteEnumProperty
-                    {
-                        Tag = tag,
-                        Value =  new FName(0,0,intEnumValue.ToString())
-                    };
-                }
-
-            
-
-            }
-
-            archive.Position -= 5;
-
-            var enumType = archive.ReadString();
-
-
-            var enumSize = archive.ReadInt32();
-            var enumPath = archive.ReadString();
-
-            var a1 = archive.ReadInt32();
-            var a2 = archive.ReadInt32();
-            _ = archive.ReadByte();
-
-            var enumValue = archive.ReadString();
-
-            return new ByteEnumProperty
-            {
-                Tag = tag,
-                Value = new FName(0, 0, enumValue)
-            };
-        }
+       
 
         if (tag.Type.Parameters.Count > 0)
         {

@@ -48,35 +48,43 @@ public class Tribe
     internal static Tribe? Create(GameObjectRecord tribeRecord)
     {
         var properties = tribeRecord.Properties.Get<StructProperty>("TribeData").Value as List<Property>;
+        if (properties == null || properties.Count == 0) return null;
+
         var tribeId = properties.Get<int>("TribeID");
-        var tribeName = properties.Get<string>("TribeName");
+        var tribeName = properties.Get<string>("TribeName")??"";
         var ownerPlayerId = properties.Get<uint>("OwnerPlayerDataId");
+        string[] memberNames = [];
+        string[] memberIds = [];
 
+        var memberIdsProperty = properties.Get<ArrayProperty?>("MembersPlayerDataID");
         var memberNamesProperty = properties.Get<ArrayProperty>("MembersPlayerName");
-        var nameCount = memberNamesProperty.Value.Count;
-        var memberNames = new string[nameCount];
-        for(int x = 0; x < nameCount; x++)
+        if (memberIdsProperty != null && memberNamesProperty!=null)
         {
-            memberNames[x] = memberNamesProperty.Value[x].ToString();
+            var idCount = memberNamesProperty.Value.Count;
+            memberIds = new string[idCount];
+            memberNames = new string[idCount];
+
+
+            for (int x = 0; x < idCount; x++)
+            {
+                memberIds[x] = memberIdsProperty.Value[x].ToString();
+                memberNames[x] = memberNamesProperty.Value[x].ToString();
+            }
         }
 
-        var memberIdsProperty = properties.Get<ArrayProperty>("MembersPlayerDataID");
-        var idCount = memberNamesProperty.Value.Count;
-        var memberIds = new string[idCount];
-        for (int x = 0; x < idCount; x++)
+        string[] tribeLogs = [];
+        var tribeLogProperty = properties.Get<ArrayProperty?>("TribeLog");
+        if(tribeLogProperty != null)
         {
-            memberIds[x] = memberIdsProperty.Value[x].ToString();
+            var lineCount = tribeLogProperty.Value.Count;
+            tribeLogs = new string[lineCount];
+            for (int x = 0; x < lineCount; x++)
+            {
+                tribeLogs[x] = tribeLogProperty.Value[x].ToString();
+            }
         }
 
-        var tribeLogProperty = properties.Get<ArrayProperty>("TribeLog");
-        var lineCount = tribeLogProperty.Value.Count;
-        var tribeLogLines = new string[lineCount];
-        for (int x = 0; x < lineCount; x++)
-        {
-            tribeLogLines[x] = tribeLogProperty.Value[x].ToString();
-        }
-        var logIndex = properties.Get<int>("LogIndex");
-        
+        var logIndex = properties.Get<int>("LogIndex");        
 
         return new Tribe
         {
@@ -86,7 +94,7 @@ public class Tribe
             OwnerPlayerDataId = ownerPlayerId,
             MemberIds = memberIds,
             MemberNames = memberNames,
-            LogLines = tribeLogLines
+            LogLines = tribeLogs
 
 
         };

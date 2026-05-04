@@ -17,17 +17,23 @@ namespace AsaSavegameToolkit.Porcelain;
 public class AsaSaveGame
 {
     public int SaveVersion { get; set; }
+    public string SaveFilename { get; set; } = string.Empty;
+    public DateTime SaveTimestamp { get; set; }= DateTime.Now;
+    private double GameTime { get; set; } = 0;
 
     public required IDictionary<Guid, Player> Players { get; set; }
     public required IDictionary<Guid, Tribe> Tribes { get; set; }
-    public required IDictionary<Guid, Creature> WildCreatures { get; set; }
-    public required IDictionary<Guid, Creature> TamedCreatures { get; set; }
+    public required IDictionary<Guid, CreatureWild> WildCreatures { get; set; }
+    public required IDictionary<Guid, CreatureTamed> TamedCreatures { get; set; }
     public required IDictionary<Guid, Structure> Structures { get; set; }
     public required IDictionary<Guid, DroppedItem> DroppedItems { get; set; }
 
     public static AsaSaveGame ReadFrom(string path, ILogger? logger = null, AsaReaderSettings? settings = null, CancellationToken cancellationToken = default)
     {
         logger ??= NullLogger.Instance;
+
+
+        var saveFileTimestamp = File.GetLastWriteTimeUtc(path);
 
         using var reader = new AsaSaveReader(path, logger, settings ?? AsaReaderSettings.None);
 
@@ -178,6 +184,7 @@ public class AsaSaveGame
                     structure.IngestInventory(inventory);
                 }
 
+
                 return structure;
             });
 
@@ -237,7 +244,16 @@ public class AsaSaveGame
                                 }
                                 var itemRecord = itemRecords[itemReference.ObjectId];
                                 var item = Item.Create(itemRecord);
+
+                                var existingItem = items.FirstOrDefault(i => i.ClassName == item.ClassName);
+                                if (existingItem != null)
+                                {
+                                    item.Quantity+=existingItem.Quantity;
+                                    items.Remove(existingItem);
+                                }
+
                                 items.Add(item);
+                                
                             }
                         }
 
@@ -251,6 +267,7 @@ public class AsaSaveGame
                 if (statusRecord != null)
                     player.IngestStatusRecord(statusRecord);
 
+                player.RefreshTimestamps(saveFileTimestamp, header.GameTime);
 
                 return player;
             });
@@ -267,7 +284,15 @@ public class AsaSaveGame
         var creatures = creatureRecords.ToDictionary(
             r => r.Key,
             r => {
-                var creature = Creature.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null);
+
+                var locationKey = r.Key;
+                if (r.Value.Properties.HasAny("CryoContainer"))
+                {
+                    locationKey = (r.Value.Properties.Get<ObjectProperty>("CryoContainer").Value as ObjectReference).ObjectId;
+
+                }
+
+                var creature = Creature.Create(r.Value, transforms.TryGetValue(locationKey, out var t) ? t : null);
                 var statusComponentRef = (ObjectReference?)r.Value.Properties.Get<ObjectProperty>("MyCharacterStatusComponent")?.Value;
                 if (statusComponentRef != null)
                 {
@@ -342,6 +367,8 @@ public class AsaSaveGame
                     }
                 }
 
+                creature.RefreshTimestamps(saveFileTimestamp, header.GameTime);
+
                 return creature;
             });
 
@@ -368,13 +395,16 @@ public class AsaSaveGame
 
             });
 
-        var tamedCreatures = creatures.Values.Where(c => c is CreatureTamed).ToDictionary(x => x.Id);
-        var wildCreatures = creatures.Values.Where(c => c is CreatureWild).ToDictionary(x => x.Id);
+        var tamedCreatures = creatures.Values.OfType<CreatureTamed>().ToDictionary(x => x.Id);
+        var wildCreatures = creatures.Values.OfType<CreatureWild>().ToDictionary(x => x.Id);
 
 
         return new AsaSaveGame
         {
             SaveVersion = header.SaveVersion,
+            SaveTimestamp = saveFileTimestamp,
+            SaveFilename = path,
+            GameTime = header.GameTime,
             Players = players,
             Tribes = tribes,
             TamedCreatures = tamedCreatures,

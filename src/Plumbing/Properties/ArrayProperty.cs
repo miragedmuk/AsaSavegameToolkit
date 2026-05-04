@@ -208,9 +208,17 @@ public class ArrayProperty : Property<IList>
 
     private static IList ReadStructArrayFile(AsaArchive archive, PropertyTag tag)
     {
-        _ = archive.ReadInt32(); // unknown
+
+        if(archive.SaveVersion < 7)
+        {
+            return ReadStructArrayFilePre7(archive, tag);
+        }
+
+
+        var checkInt1 = archive.ReadInt32(); // unknown
         var structKey = archive.ReadString();
-        _ = archive.ReadInt32(); // unknown
+        var checkInt2 = archive.ReadInt32(); // unknown
+        
         var structClassPath = archive.ReadString(); // structType / path
         _ = archive.ReadBytes(8); // struct id / padding
         _ = archive.ReadByte(); // separator
@@ -237,5 +245,36 @@ public class ArrayProperty : Property<IList>
 
         return elements;
 
+    }
+
+    private static IList ReadStructArrayFilePre7(AsaArchive archive, PropertyTag tag)
+    {
+        var count = archive.ReadInt32();
+        var name = archive.ReadFName();
+        var type = archive.ReadFName();
+
+        _ = archive.ReadBytes(8);
+
+        var innerKey = archive.ReadFName();
+
+        _ = archive.ReadBytes(17);
+
+        FPropertyTypeName arrayTypeStruct = FPropertyTypeName.Create(tag.Type.Parameters[0].TypeName, innerKey);
+
+        var structTag = new PropertyTag
+        {
+            Name = name,
+            Type = arrayTypeStruct,
+            ArrayIndex = 0,
+            Size = 1
+        };
+
+        var elements = new object[count];
+        for (int i = 0; i < count; i++)
+        {
+            elements[i] = StructProperty.ReadValue(archive, structTag);
+        }
+
+        return elements;
     }
 }

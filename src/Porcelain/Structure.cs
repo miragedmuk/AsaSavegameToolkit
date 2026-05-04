@@ -11,8 +11,12 @@ public class Structure
     public required string ClassName { get; set; }
     public string? StructureName { get; set; }
     public bool IsActivated { get; set; } = false;
-    public double LastActivatedTime { get; set; } = 0;
-    public double LastDeactivatedTime { get; set; } = 0;
+    internal double LastActivatedGameTime { get; set; } = 0;
+    internal double LastDeactivatedGameTime { get; set; } = 0;
+
+    public DateTime? LastActivatedTimestamp { get; set; }
+    public DateTime? LastDeactivatedTimestamp { get; set;  }
+
     public Inventory? Inventory { get; set; }
     public FVector? Location { get;  set; }
     public FQuat? Rotation { get;  set; }
@@ -41,8 +45,8 @@ public class Structure
             ClassName = className,
             StructureName = displayName,
             IsActivated = containerActivated,
-            LastActivatedTime = lastActivatedTime,
-            LastDeactivatedTime = lastDeactivatedTime,
+            LastActivatedGameTime = lastActivatedTime,
+            LastDeactivatedGameTime = lastDeactivatedTime,
             Location = transform?.Location,
             Rotation = transform?.Rotation
         };
@@ -57,5 +61,18 @@ public class Structure
     {
         var name = StructureName ?? ClassName;
         return $"{name}";
+    }
+
+    internal virtual void RefreshTimestamps(DateTime saveTimestamp, double gameTime)
+    {
+        if(LastActivatedGameTime > 0)
+        {
+            LastActivatedTimestamp = saveTimestamp.AddSeconds(LastActivatedGameTime - gameTime);
+        }
+
+        if(LastDeactivatedGameTime > 0)
+        {
+            LastDeactivatedTimestamp = saveTimestamp.AddSeconds(LastDeactivatedGameTime - gameTime);
+        }
     }
 }

@@ -97,6 +97,8 @@ public class Creature
     public bool IsCryo { get; set; } = false;
     public bool IsNeutered { get; set; } = false;
     public float Scale { get; set; } = 1;
+    internal double OriginalCreationGameTime { get; set; }
+    public DateTime? OriginalCreationTimestamp { get; set; } = null;
 
     public override string ToString()
     {
@@ -142,6 +144,14 @@ public class Creature
     internal virtual void IngestStatusRecord(GameObjectRecord statusComponent)
     {
      
+    }
+
+    internal virtual void RefreshTimestamps(DateTime saveDate, double gameTime)
+    {
+        if (OriginalCreationGameTime > 0)
+        {
+            OriginalCreationTimestamp = saveDate.AddSeconds(OriginalCreationGameTime - gameTime);
+        }
     }
 
 }

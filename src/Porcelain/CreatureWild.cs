@@ -45,6 +45,7 @@ namespace AsaSavegameToolkit.Porcelain
             {
                 Id = actor.Uuid,
                 ClassName = actor.GetClassName(),
+                OriginalCreationGameTime = originalCreationTime,
                 IsCryo = isInCryo,
                 IsFemale = isFemale,
                 BabyAge = babyAge,
@@ -85,7 +86,22 @@ namespace AsaSavegameToolkit.Porcelain
             }
 
             BaseLevel = baseLevel;
+            if(BaseLevel==0)
+                BaseLevel= 1;
+
             TotalLevel = wildLevels;
+            if(TotalLevel==0)
+                TotalLevel = 1;
+        }
+
+        internal override void RefreshTimestamps(DateTime saveDate, double gameTime)
+        {
+            if (OriginalCreationGameTime > 0)
+            {
+                OriginalCreationTimestamp = saveDate.AddSeconds(OriginalCreationGameTime - gameTime);
+            }
+
+
         }
     }
 }

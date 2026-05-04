@@ -51,22 +51,38 @@ public class ObjectReference
         
         if (referenceType == 1)
         {
-            // Path reference (FName)
-            return new ObjectReference
+            var pos = archive.Position;
+            try
             {
-                IsPath = true,
-                Path = archive.ReadFName()
-            };
+                // Path reference (FName)
+
+                var pathName = archive.ReadFName();
+                return new ObjectReference
+                {
+                    IsPath = true,
+                    Path = pathName
+                };
+            }
+            catch
+            {
+                archive.Position = pos;
+                var p1 = archive.ReadInt64();
+                
+                return new ObjectReference()
+                {
+                    IsPath = false,
+                    ObjectId = Guid.Empty
+                };
+            }
+
         }
-        else
+
+        // GUID reference (most common)
+        return new ObjectReference
         {
-            // GUID reference (most common)
-            return new ObjectReference
-            {
-                IsPath = false,
-                ObjectId = archive.ReadGuid()
-            };
-        }
+            IsPath = false,
+            ObjectId = archive.ReadGuid()
+        };
     }
 
     private static ObjectReference ReadFile(AsaArchive archive)
@@ -100,14 +116,36 @@ public class ObjectReference
 
         if (referenceType == 1)
         {
-            var pathValue = archive.ReadFName();
-
-            // Path reference (FName)
-            return new ObjectReference
+            var valStart = archive.Position;
+            var allow = archive.AllowDynamicNameTable;
+            archive.AllowDynamicNameTable = false;
+            try
             {
-                IsPath = true,
-                Path = pathValue
-            };
+
+                var pathValue = archive.ReadFName();
+
+                // Path reference (FName)
+                return new ObjectReference
+                {
+                    IsPath = true,
+                    Path = pathValue
+                };
+            }
+            catch
+            {
+                archive.Position = valStart;
+                archive.AllowDynamicNameTable = allow;                
+                var pathValue = archive.ReadString();
+
+                // Path reference (FName)
+                return new ObjectReference
+                {
+                    IsPath = true,
+                    Path = new FName(0,0,pathValue)
+                };
+
+            }
+            archive.AllowDynamicNameTable = allow;
         }
         else
         {

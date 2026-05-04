@@ -17,7 +17,7 @@ namespace AsaSavegameToolkit
         public List<string> GeneTraits { get; set; } = new List<string>();
 
 
-        internal static Item Create(GameObjectRecord record, ActorTransform? location = default)
+        internal static FertileEggItem Create(GameObjectRecord record, ActorTransform? location = default)
         {
             var className = record.GetClassName();
 

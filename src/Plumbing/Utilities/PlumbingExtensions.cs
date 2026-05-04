@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
-
+using System.Numerics;
+using AsaSavegameToolkit.Plumbing.Primitives;
 using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
 

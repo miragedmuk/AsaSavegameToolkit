@@ -14,9 +14,14 @@ namespace AsaSavegameToolkit.Porcelain
         public string TribeName { get; set; } = string.Empty;
         public long OwningPlayerId { get; set; } = 0;
         public long PlacerId { get; set; } = 0;
-        public string PlacedTimestamp { get; set; } = string.Empty;
-        public double CreationTime { get; set; } = 0;
-        public double LastAllyInRangeTime { get; set; } = 0;
+        public string PlacedTime { get; set; } = string.Empty;
+        
+        internal double CreationGameTime { get; set; } = 0;
+        internal double LastAllyInRangeGameTime { get; set; } = 0;
+        
+        public DateTime? CreationTimestamp { get; set; }
+        public DateTime? LastAllyInRangeTimestamp { get; set; }
+
         public bool HasFuel { get; set; } = false;
         public bool LastToggleActivated { get; set; } =false;
         public bool IsPinLocked { get; set; } = false;
@@ -63,11 +68,11 @@ namespace AsaSavegameToolkit.Porcelain
                 ClassName = className,
                 StructureName = displayName,
                 IsActivated = containerActivated,
-                LastActivatedTime = lastActivatedTime,
-                LastDeactivatedTime = lastDeactivatedTime,
+                LastActivatedGameTime = lastActivatedTime,
+                LastDeactivatedGameTime = lastDeactivatedTime,
                 TribeId = targetingTeam,
                 TribeName = ownerName,
-                CreationTime = originalCreationTime,
+                CreationGameTime = originalCreationTime,
                 HasFuel = hasFuel,
                 IsFertilized = isFertilized,
                 IsPinLocked = isPinLocked,
@@ -75,10 +80,10 @@ namespace AsaSavegameToolkit.Porcelain
                 IsSeeded = isSeeded,
                 IsPowered = isPowered,
                 IsWatered = isWatered,
-                LastAllyInRangeTime = lastInAllyRangeTimeSerialized,
+                LastAllyInRangeGameTime = lastInAllyRangeTimeSerialized,
                 OwningPlayerId = owningPlayerId,
                 LastToggleActivated = lastToggleActivated,
-                PlacedTimestamp = originalPlacedTimeStamp,
+                PlacedTime = originalPlacedTimeStamp,
                 PlacerId = originalPlacerId,
                 Location = transform?.Location,
                 Rotation = transform?.Rotation
@@ -95,6 +100,31 @@ namespace AsaSavegameToolkit.Porcelain
             var name = StructureName ?? ClassName;
             var tribe = TribeName != null ? $" [{TribeName}]" : "";
             return $"{name}{tribe}";
+        }
+
+
+        internal override void RefreshTimestamps(DateTime saveTimestamp, double gameTime)
+        {
+            if (LastActivatedGameTime > 0)
+            {
+                LastActivatedTimestamp = saveTimestamp.AddSeconds(LastActivatedGameTime - gameTime);
+            }
+
+            if (LastDeactivatedGameTime > 0)
+            {
+                LastDeactivatedTimestamp = saveTimestamp.AddSeconds(LastDeactivatedGameTime - gameTime);
+            }
+
+            if (CreationGameTime > 0)
+            {
+                CreationTimestamp = saveTimestamp.AddSeconds(CreationGameTime - gameTime);
+            }
+
+            if (LastAllyInRangeGameTime > 0)
+            {
+                LastAllyInRangeTimestamp = saveTimestamp.AddSeconds(LastAllyInRangeGameTime - gameTime);
+            }
+
         }
 
     }

@@ -11,6 +11,8 @@ public class SaveHeaderRecord
     /// </summary>
     public required short SaveVersion { get; init; }
     
+    public double GameTime { get; init; }
+
     /// <summary>
     /// Name table - maps integer IDs to string names.
     /// Used throughout the save file to reduce duplication.
@@ -38,7 +40,8 @@ public class SaveHeaderRecord
         
         // Read name table offset
         var nameTableOffset = archive.ReadInt32();
-        
+        var gameTime = archive.ReadDouble();
+
         // Skip to name table
         archive.Position = nameTableOffset;
         
@@ -48,6 +51,7 @@ public class SaveHeaderRecord
         return new SaveHeaderRecord
         {
             SaveVersion = saveVersion,
+            GameTime = gameTime,
             NameTable = nameTable
         };
     }
@@ -61,6 +65,7 @@ public class SaveHeaderRecord
         
         // Read name table offset
         var nameTableOffset = archive.ReadInt32();
+        var gameTime = archive.ReadDouble();
         
         // Skip to name table
         archive.Position = nameTableOffset;
@@ -71,6 +76,7 @@ public class SaveHeaderRecord
         return new SaveHeaderRecord
         {
             SaveVersion = saveVersion,
+            GameTime = gameTime,
             NameTable = nameTable
         };
     }

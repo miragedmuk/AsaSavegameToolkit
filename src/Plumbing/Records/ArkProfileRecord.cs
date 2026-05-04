@@ -17,10 +17,14 @@ namespace AsaSavegameToolkit.Plumbing.Records
 
             // Header sequence
             var fileVersion = archive.ReadInt32(); // tribeVersion
-            if (fileVersion < 7) throw new AsaDataException($"Unsupported .arkprofile version: {fileVersion}");
-
             archive.SaveVersion = (short)fileVersion; // Set save version for correct parsing
             archive.IsArkFile = true; // Mark as Ark file for correct handling
+
+            if(fileVersion < 7)
+            {
+                return ReadPre7(archive, uuid);
+            }
+
 
             var gameVersion = archive.ReadInt32();
             var packageVersion = archive.ReadInt32();
@@ -48,6 +52,43 @@ namespace AsaSavegameToolkit.Plumbing.Records
             ObjectTypeFlags objectType = ObjectTypeFlags.Actor;
 
             return new GameObjectRecord(uuid, new Primitives.FName(0, 0, classPath), names, properties, 0, objectType, default);
+        }
+
+        private static GameObjectRecord ReadPre7(AsaArchive archive, Guid uuid)
+        {
+            var profileCount = archive.ReadInt32();
+
+
+            //start game object
+            var uuid2 = archive.ReadGuid();
+            var className = archive.ReadString();
+            _ = archive.ReadInt32();
+
+            var nameCount = archive.ReadInt32();
+            List<string> names = new List<string>();
+            while (nameCount-- > 0)
+            {
+                var name = archive.ReadString();
+                names.Add(name);
+            }
+
+            _ = archive.ReadInt32();
+            _ = archive.ReadInt32();
+
+            var hasLocation = archive.ReadInt32();
+            if (hasLocation != 0)
+            {
+
+            }
+            var propertiesOffset = archive.ReadInt32();
+
+            archive.Position = propertiesOffset;
+            var properties = Property.ReadList(archive);
+
+
+            ObjectTypeFlags objectType = ObjectTypeFlags.Actor;
+
+            return new GameObjectRecord(uuid, new Primitives.FName(0, 0, className), names, properties, 0, objectType, default);
         }
 
         public static GameObjectRecord ReadFromFile(string filePath, Guid uuid)

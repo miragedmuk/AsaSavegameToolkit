@@ -2,6 +2,7 @@
 using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
+using System.ComponentModel.DataAnnotations;
 
 namespace AsaSavegameToolkit.Porcelain
 {
@@ -48,13 +49,20 @@ namespace AsaSavegameToolkit.Porcelain
 
         public bool IsWandering { get; set; } = false;
         public bool IsMating { get; set; } = false;
+        public bool IsClone { get; set; } = false;
         public float ExperiencePoints { get; set; } = 0;
 
         /// <summary>
         /// Server time (seconds since epoch) when this creature was tamed. Null if not tamed.
         /// </summary>
-        public double? TamedAtTime { get; set; }
-        public double? LastAllyInRangeTime { get; set; }
+        internal double? TamedAtGameTime { get; set; }
+        internal double? LastAllyInRangeGameTime { get; set; }
+        internal double? OriginalCreationGameTime { get; set; }
+
+        public DateTime? TamedTimestamp { get; set; } = null;
+        public DateTime? LastAllyInRangeTimestamp { get; set; } = null;
+        public DateTime? OriginalCreationTimestamp { get; set; } = null;
+
 
         public byte[] TamedStats { get; set; } = new byte[12];
 
@@ -98,24 +106,26 @@ namespace AsaSavegameToolkit.Porcelain
             bool isTameable = properties.Get<bool>("bForceDisablingTaming") == false;
             float babyAge = properties.Get<float>("BabyAge");
 
-            var originalCreationTime = properties.Get<double>("OriginalCreationTime");
             var wildScale = properties.Get<float>("WildRandomScale");
 
-
-            //read tamed properties
-            var tamedName = properties.Get<string>("TamedName");
+            var tamedName = properties.Get<string>("TamedName")??"";
             var tamedTimestamp = properties.Get<string>("TamedTimeStamp");
             var imprintNetId = properties.Get<string>("ImprinterPlayerUniqueNetId");
-            var imprinterName = properties.Get<string>("ImprinterName");
-            var uploadedFromServer = properties.Get<string>("UploadedFromServerName");
-            var tamedOnServer = properties.Get<string>("TamedOnServerName");
+            var imprinterName = properties.Get<string>("ImprinterName")??"";
+            var uploadedFromServer = properties.Get<string>("UploadedFromServerName")??"";
+            var tamedOnServer = properties.Get<string>("TamedOnServerName")??"";
             var imprintClassName = properties.Get<ObjectProperty>("BabyCuddleFood")?.Value?.Path;
+
+
+            var originalCreationTime = properties.Get<double>("OriginalCreationTime");
             var lastTameConsumedFoodTime = properties.Get<double>("LastTameConsumedFoodTime");
+            var lastAllyInRangeGameTime = properties.Get<double>("LastInAllyRangeSerialized");
             var tamedAtTime = properties.Get<double>("TamedAtTime");
+
             var tamedAggressionLevel = properties.Get<int>("TamedAggressionLevel");
             var isMating = properties.Get<bool>("bEnableTamedMating");
             var isWandering = properties.Get<bool>("bEnableTamedWandering");
-            var tribeName = properties.Get<string>("TribeName");
+            var tribeName = properties.Get<string>("TribeName")??"";
             var isNeutered = properties.Get<bool>("bNeutered");
             var isClone = properties.Get<bool>("bIsClone");
 
@@ -164,6 +174,9 @@ namespace AsaSavegameToolkit.Porcelain
                 }
             }
 
+            var tamerString = properties.Get<string>("TamerString")??"";
+            
+
             //tamed
             return new CreatureTamed
             {
@@ -177,11 +190,16 @@ namespace AsaSavegameToolkit.Porcelain
                 ColorRegions = colorRegions,
                 Scale = wildScale,
                 TribeId = targetingTeam,
+                TribeName = tribeName,
                 Traits = geneTraits.ToArray(),
                 ImprinterName = imprinterName,
+                TamerString = tamerString,
                 IsMating = isMating,
                 IsNeutered = isNeutered,
                 TamedName = tamedName,
+                OriginalCreationGameTime = originalCreationTime,
+                LastAllyInRangeGameTime = lastAllyInRangeGameTime,
+                TamedAtGameTime = tamedAtTime,
                 Location = transform?.Location,
                 Rotation = transform?.Rotation
             };
@@ -233,12 +251,37 @@ namespace AsaSavegameToolkit.Porcelain
                 tameMutations += mutationStats[i];
             }
 
+            WildStats = wildStats;
+            TamedStats = tameStats;
             TamedMutations = mutationStats;
+
             BaseLevel = baseLevel;
+            if (baseLevel == 0)
+                BaseLevel = 1;
+
             TotalLevel = wildLevels + tameLevels;
+            if (TotalLevel == 0)
+                TotalLevel = 1;
+
             MutationsFemale = randomMutationsFemale;
             MutationsMale = randomMutationsMale;
             TotalMutations = tameMutations + randomMutationsMale + randomMutationsFemale;
+        }
+
+        internal override void RefreshTimestamps(DateTime saveDate, double gameTime)
+        {
+            if (OriginalCreationGameTime != null)
+            {
+                OriginalCreationTimestamp = saveDate.AddSeconds(OriginalCreationGameTime.Value - gameTime);
+            }
+            if (TamedAtGameTime != null)
+            {
+                TamedTimestamp = saveDate.AddSeconds(TamedAtGameTime.Value - gameTime);
+            }
+            if (LastAllyInRangeGameTime != null)
+            {
+                LastAllyInRangeTimestamp = saveDate.AddSeconds(LastAllyInRangeGameTime.Value - gameTime);
+            }
         }
 
         public override string ToString()
