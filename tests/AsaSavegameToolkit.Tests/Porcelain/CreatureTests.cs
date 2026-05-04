@@ -282,7 +282,7 @@ public class CreatureTests : SaveTests
             _ = tamed.TamerString;
             _ = tamed.ImprintQuality;
             _ = tamed.ImprinterName;
-            _ = tamed.TamedAtTime;
+            _ = tamed.TamedAtGameTime;
         }
 
     }
@@ -317,7 +317,7 @@ public class CreatureTests : SaveTests
             _ = tamed.TamerString;
             _ = tamed.ImprintQuality;
             _ = tamed.ImprinterName;
-            _ = tamed.TamedAtTime;
+            _ = tamed.TamedAtGameTime;
         }
     }
 
