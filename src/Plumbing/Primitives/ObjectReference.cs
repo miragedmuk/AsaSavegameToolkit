@@ -48,41 +48,42 @@ public class ObjectReference
         }
 
         var referenceType = archive.ReadInt16();
-        
-        if (referenceType == 1)
+
+        if (referenceType == 0)
         {
-            var pos = archive.Position;
-            try
+            // GUID reference (most common)
+            return new ObjectReference
             {
-                // Path reference (FName)
-
-                var pathName = archive.ReadFName();
-                return new ObjectReference
-                {
-                    IsPath = true,
-                    Path = pathName
-                };
-            }
-            catch
-            {
-                archive.Position = pos;
-                var p1 = archive.ReadInt64();
-                
-                return new ObjectReference()
-                {
-                    IsPath = false,
-                    ObjectId = Guid.Empty
-                };
-            }
-
+                IsPath = false,
+                ObjectId = archive.ReadGuid()
+            };
         }
 
-        // GUID reference (most common)
-        return new ObjectReference
+
+        var pos = archive.Position;
+        try
         {
-            IsPath = false,
-            ObjectId = archive.ReadGuid()
-        };
+            // Path reference (FName)
+
+            var pathName = archive.ReadFName();
+            return new ObjectReference
+            {
+                IsPath = true,
+                Path = pathName
+            };
+        }
+        catch
+        {
+            archive.Position = pos;
+            var p1 = archive.ReadInt64();
+                
+            return new ObjectReference()
+            {
+                IsPath = false,
+                ObjectId = Guid.Empty
+            };
+        }
+
     }
 
     private static ObjectReference ReadFile(AsaArchive archive)

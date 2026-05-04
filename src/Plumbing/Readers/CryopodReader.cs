@@ -144,6 +144,8 @@ public sealed class CryopodReader : IDisposable
                 GameObjectRecord[] cryoObjects;
                 try
                 {
+
+
                     cryoObjects = ParseCryoBlob(cryoPod, blob, index, cancellationToken);
                     results.Add(cryoObjects);
                 }
@@ -309,6 +311,36 @@ public sealed class CryopodReader : IDisposable
         return results;
     }
 
+
+    private byte[] GetRawBytes(byte[] data)
+    {
+        if (IsCompressed(data))
+        {
+            // Skip the first 8 bytes of ASA header and decompress the rest
+            using var input = new MemoryStream(data, 8, data.Length - 8);
+            using var decompressor = new ZLibStream(input, CompressionMode.Decompress);
+            using var output = new MemoryStream();
+            decompressor.CopyTo(output);
+
+            return WildcardInflater.Inflate(output.ToArray());
+        }
+
+        // If not compressed, return the raw data (or handle based on your specific format)
+        return data;
+    }
+
+    private bool IsCompressed(byte[] data)
+    {
+        // A valid Zlib stream must be at least 10 bytes (8 byte header + 2 byte magic)
+        if (data == null || data.Length < 10) return false;
+
+        // Check index 8 and 9 for common Zlib headers
+        // 0x78 0x01: No/Low compression
+        // 0x78 0x9C: Default compression (Most common in ASA)
+        // 0x78 0xDA: Best compression
+        return data[8] == 0x78 && (data[9] == 0x9C || data[9] == 0x01 || data[9] == 0xDA);
+    }
+
     /// <summary>
     /// Parses the cryo blob into a list of <see cref="GameObjectRecord"/>.
     /// </summary>
@@ -323,6 +355,7 @@ public sealed class CryopodReader : IDisposable
 
         var objectType = version & 0xFF00;  // 0406 -> 0400
         var dataStore = objectType == 0x0400;  // 0400 == dataStore v6 (dino). 00 == individual v7+ (saddle/costume)
+
         version &= 0x00FF; // mask to 8 bits.  0406 -> 06
 
         if (version < 7)
@@ -473,7 +506,7 @@ public sealed class CryopodReader : IDisposable
         else
         {
             // For uncompressed blobs (saddle/costume), skip decompression and treat the blob after the header as the final payload directly.
-            payloadBytes = bytes;
+            payloadBytes = GetRawBytes(bytes);
             DumpDebugBytes(Path.ChangeExtension(binName, "raw.bin"), bytes);
 
 
@@ -560,6 +593,9 @@ public sealed class CryopodReader : IDisposable
 
         // Now parse object metadata manually (BinaryReader) to avoid alignment issues
         var results = new List<GameObjectRecord>();
+
+        var isCompressed = IsCompressed(bytes);
+
 
         byte[] payloadBytes;
         int? namesOffset = null;
@@ -681,77 +717,78 @@ public sealed class CryopodReader : IDisposable
         else
         {
             // For uncompressed blobs (saddle/costume), skip decompression and treat the blob after the header as the final payload directly.
-            payloadBytes = bytes;
-
-            DumpDebugBytes(binName, payloadBytes);
-
-            if (payloadBytes.Length >= 40)
+            if (!IsCompressed(bytes))
             {
-                var testArchive = new AsaArchive(_logger, payloadBytes, $"{cryoPod.Uuid}[{index}]")
+                DumpDebugBytes(binName, bytes);
+
+                if (bytes.Length >= 40)
                 {
-                    SaveVersion = (short)version,
-                    AllowDynamicNameTable = false,
-                    IsCryopod = true,
-                    IsArkFile = false
-                };
-                testArchive.ReadInt32();
-
-                var props = Property.ReadList(testArchive);
-
-                if (props.HasAny("ItemArchetype"))
-                {
-                    Guid containerId = Guid.NewGuid();
-
-                    //item
-                    var classReference = props.Get<ObjectProperty>("ItemArchetype").Value as ObjectReference;
-                    FName className = new FName(0, 0, classReference.Value.Substring(classReference.Value.LastIndexOf(".") + 1));
-                    var itemQuantityProp = props.Get<IntProperty>("ItemQuantity");
-                    if (itemQuantityProp != null && itemQuantityProp.Value == 0)
+                    var rawArchive = new AsaArchive(_logger, bytes, $"{cryoPod.Uuid}[{index}]")
                     {
-                        //remove and re-add with quantity=1
-                        props.Remove(itemQuantityProp);
-                        itemQuantityProp.Value = 1;
-                        props.Add(itemQuantityProp);
-                    }
-
-                    //assign to new container
-                    props.Add(new ObjectProperty()
+                        SaveVersion = (short)version,
+                        AllowDynamicNameTable = false,
+                        IsCryopod = true,
+                        IsArkFile = false
+                    };
+                    var archiveType = rawArchive.ReadInt32();
                     {
-                        Tag = new PropertyTag()
+                        var props = Property.ReadList(rawArchive);
+                        if (props.HasAny("ItemArchetype"))
                         {
-                            Name = new FName(0, 0, "OwnerInventory"),
-                            Type = FPropertyTypeName.Create(new FName(0, 0, "ObjectProperty")),
-                            Size = 16,
-                            ArrayIndex = 0,
-                            Flags = 0
-                        },
-                        Value = new ObjectReference()
-                        {
-                            IsPath = false,
-                            ObjectId = Guid.Empty
+                            Guid containerId = Guid.NewGuid();
+
+                            //item
+                            var classReference = props.Get<ObjectProperty>("ItemArchetype").Value as ObjectReference;
+                            FName className = new FName(0, 0, classReference.Value.Substring(classReference.Value.LastIndexOf(".") + 1));
+                            var itemQuantityProp = props.Get<IntProperty>("ItemQuantity");
+                            if (itemQuantityProp != null && itemQuantityProp.Value == 0)
+                            {
+                                //remove and re-add with quantity=1
+                                props.Remove(itemQuantityProp);
+                                itemQuantityProp.Value = 1;
+                                props.Add(itemQuantityProp);
+                            }
+
+                            //assign to new container
+                            props.Add(new ObjectProperty()
+                            {
+                                Tag = new PropertyTag()
+                                {
+                                    Name = new FName(0, 0, "OwnerInventory"),
+                                    Type = FPropertyTypeName.Create(new FName(0, 0, "ObjectProperty")),
+                                    Size = 16,
+                                    ArrayIndex = 0,
+                                    Flags = 0
+                                },
+                                Value = new ObjectReference()
+                                {
+                                    IsPath = false,
+                                    ObjectId = Guid.Empty
+                                }
+                            });
+
+                            string[] names = new string[1];
+                            names[0] = className.ToString();
+
+                            GameObjectRecord itemObject = new GameObjectRecord(
+                                Guid.NewGuid(),
+                                className,
+                                names: names,
+                                props,
+                                dataFileIndex: 0,
+                                ObjectTypeFlags.None,
+                                extraGuids: []
+                            );
+                            results.Add(itemObject);
+
                         }
-                    });
-
-                    string[] names = new string[1];
-                    names[0] = className.ToString();
-
-                    GameObjectRecord itemObject = new GameObjectRecord(
-                        Guid.NewGuid(),
-                        className,
-                        names: names,
-                        props,
-                        dataFileIndex: 0,
-                        ObjectTypeFlags.None,
-                        extraGuids: []
-                    );
-                    results.Add(itemObject);
-
+                    }
                 }
 
             }
 
-        }
 
+        }
 
         return [.. results];
     }

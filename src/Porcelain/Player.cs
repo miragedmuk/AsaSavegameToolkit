@@ -61,6 +61,7 @@ public class Player
     public string[] EquippedItems { get; set; } = new string[10];
     public List<int> ExplorerNotesFound { get; set; } = new List<int>();
     public List<string> NamedExplorerNotesFound { get; set; } = new List<string>();
+    public List<string> EmotesUnlocked { get; set; } = new List<string>();
     public Dictionary<string, byte> Skills { get; set; } = new Dictionary<string, byte>();
     public Dictionary<string, float> CurrentMilestones { get; set; } = new Dictionary<string, float>();
     public List<string> CompletedMilestones { get; set; } = new List<string>();
@@ -143,6 +144,7 @@ public class Player
         Dictionary<string, byte> unlockedSkills = new Dictionary<string, byte>(); //skill,rank
         Dictionary<string, float> currentMilestones = new Dictionary<string, float>(); //milestone,progress
         List<string> completedMilestones = new List<string>();
+        List<string> unlockedEmotes = new List<string>();
 
         var persistentConfigProperties = myDataProperties.Get<StructProperty>("MyPersistentCharacterStats")?.Value as List<Property>;
         if (persistentConfigProperties != null)
@@ -243,6 +245,23 @@ public class Player
                     completedMilestones.Add(milestone.Name);
                 }
             }
+
+
+
+            if (persistentConfigProperties.HasAny("EmoteUnlocks"))
+            {
+                var emoteUnlocks = persistentConfigProperties.Get<ArrayProperty>("EmoteUnlocks")?.Value;
+                if (emoteUnlocks != null)
+                {
+
+                    foreach (FName emoteName in emoteUnlocks)
+                    {
+                        unlockedEmotes.Add(emoteName.Name);
+                    }
+                }
+            }
+
+
         }
 
         Color[] bodyColors = new Color[3];
@@ -254,9 +273,8 @@ public class Player
             characterName = persistentStatusProperties.Get<string>("PlayerCharacterName");
 
             headHairGrowth = persistentStatusProperties.Get<float>("PercentOfFullHeadHairGrowth");
-            
 
-            for(int i = 0; i< bodyColors.Length; i++)
+            for (int i = 0; i< bodyColors.Length; i++)
             {
                 var bodyColorStruct = (FLinearColor?)persistentStatusProperties.Get<StructProperty>("BodyColors", i)?.Value;
                 if (bodyColorStruct != null)
@@ -295,6 +313,7 @@ public class Player
             CurrentMilestones = currentMilestones,
             FreeSkillPoints = freeSkillPoints,
             EngramsLearned = learnedEngrams,
+            EmotesUnlocked = unlockedEmotes,
             EquippedItems = equippedItems,
             ExperiencePoints = experiencePoints,
             ExplorerNotesFound = unlockedExplorerNotes,
@@ -327,7 +346,10 @@ public class Player
         var experiencePoints = properties.Get<float>("ExperiencePoints");
         ExperiencePoints = experiencePoints;
 
+        if (properties.HasAny("EmoteUnlocks"))
+        {
 
+        }
         var playerLevel = 1;
         byte[] currentStats = new byte[12];
         for (int i = 0; i < 12; i++)
@@ -350,7 +372,10 @@ public class Player
     internal void IngestCharacterRecord(GameObjectRecord characterComponent)
     {
         var properties = characterComponent.Properties;
+        if (properties.HasAny("EmoteUnlocks"))
+        {
 
+        }
         var playeName = properties.Get<string>("PlayerName");
         CharacterName = playeName;
 
@@ -374,11 +399,17 @@ public class Player
             var bodyColorStruct = (FLinearColor?)properties.Get<StructProperty>("BodyColors", i)?.Value;
             if (bodyColorStruct != null)
             {
+                var a = bodyColorStruct.Value.A > 1 ? 1 : bodyColorStruct.Value.A;
+                var r = bodyColorStruct.Value.R > 1 ? 1 : bodyColorStruct.Value.R;
+                var g = bodyColorStruct.Value.G > 1 ? 1 : bodyColorStruct.Value.G;
+                var b = bodyColorStruct.Value.B > 1 ? 1 : bodyColorStruct.Value.B;
+
+
                 bodyColors[i] = Color.FromArgb(
-                    (int)(bodyColorStruct.Value.A * 255),
-                    (int)(bodyColorStruct.Value.R * 255),
-                    (int)(bodyColorStruct.Value.G * 255),
-                    (int)(bodyColorStruct.Value.B * 255));
+                    (int)(a * 255),
+                    (int)(r * 255),
+                    (int)(g * 255),
+                    (int)(b * 255));
             }
             else
             {

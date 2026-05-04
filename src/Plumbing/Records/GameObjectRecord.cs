@@ -134,7 +134,9 @@ public class GameObjectRecord
         
         // Read data file index
         var dataFileIndex = archive.ReadInt32();
-        
+
+        var pos = archive.Position;
+
         // Read object type flags
         var objectType = (ObjectTypeFlags)archive.ReadByte();
 
