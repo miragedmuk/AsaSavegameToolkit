@@ -3,12 +3,10 @@ using AsaSavegameToolkit.Plumbing.Properties;
 using AsaSavegameToolkit.Plumbing.Readers;
 using AsaSavegameToolkit.Plumbing.Records;
 using AsaSavegameToolkit.Plumbing.Utilities;
-using CommunityToolkit.HighPerformance.Buffers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Collections.Concurrent;
 using System.Data;
-using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -57,47 +55,6 @@ public class AsaSaveGame
         var unknownRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
 
 
-        // Place all top-level objects (those with only 1 name) into the recordsByName dictionary so they
-        // can be referenced as parents by their components in the second pass.
-        Dictionary<string, GameObjectRecord> recordsByName = gameObjects.Values
-            .Where(x => x.Names.Count == 1)
-            .DistinctBy(x => x.Names[0])
-            .ToDictionary(x => x.Names[0]);
-
-        // Second pass: for each game object with multiple names, find its parent object in recordsByName using the
-        // last name in the Names list, then crawl down the component stack using the preceding names until we find the
-        // correct parent to attach this component to.
-
-        foreach (var gameObject in gameObjects.Values.Where(x => x.Names.Count > 1))
-        {
-            var parentName = gameObject.Names[^1];
-            if (!recordsByName.TryGetValue(parentName, out var parent))
-            {
-                // only warn about missing parents if the parent name isn't rooted.
-                // We don't expect to find `/Game/PrimalEarth/Sound/PlayerVoice/Female_Legacy/DA_Female_Legacy` in the records.
-                if (!parentName.StartsWith('/'))
-                {
-                    logger.LogWarning(
-                        "Could not find parent game object with name {ParentName} for game object with name {ChildName}",
-                        gameObject.Names[1],
-                        gameObject.Names[0]);
-                }
-
-                continue;
-            }
-
-            // The component names are in deepest-first order, so crawl from the back of the list forward down the component stack
-            // This will probably never be be invoked as there are no known objects with more than 2 names
-            for (var i = gameObject.Names.Count - 2; i > 0; i--)
-            {
-                parent = parent.Components[gameObject.Names[i]];
-            }
-
-            parent.Components[gameObject.Names[0]] = gameObject;
-        }
-        recordsByName = null!;
-
-
         // Third Pass: now that we've nested all the components, we can categorize the top level game objects by type
         Parallel.ForEach(gameObjects.Values, gameObject =>
         //foreach (var gameObject in gameObjects.Values)
@@ -141,7 +98,7 @@ public class AsaSaveGame
                 var structure = Structure.Create(r.Value, transforms.TryGetValue(r.Key, out var t) ? t : null);
 
                 var inventoryComponentRef = (ObjectReference?)r.Value.Properties.Get<ObjectProperty>("MyInventoryComponent")?.Value;
-                if (inventoryComponentRef != null)
+                if (inventoryComponentRef != null && inventoryRecords.ContainsKey(inventoryComponentRef.ObjectId))
                 {
                     var inventoryRecord = inventoryRecords[inventoryComponentRef.ObjectId];
 
@@ -154,7 +111,7 @@ public class AsaSaveGame
                     {
                         foreach (ObjectReference itemReference in inventoryItems)
                         {
-                            if (itemReference.ObjectId == Guid.Empty)
+                            if (itemReference.ObjectId == Guid.Empty || !itemRecords.ContainsKey(itemReference.ObjectId))
                             {
                                 continue; //skip empty slots
                             }
@@ -214,7 +171,7 @@ public class AsaSaveGame
                     var statusRefProperty = (ObjectReference)characterRecord.Properties.Get<ObjectProperty>("MyCharacterStatusComponent")?.Value;
 
                     var statusRef = statusRefProperty?.ObjectId;
-                    if (statusRef != null)
+                    if (statusRef != null && statusRecords.ContainsKey(statusRef.Value))
                         statusRecord = statusRecords[statusRef.Value];
                 }
 
@@ -225,7 +182,7 @@ public class AsaSaveGame
                     player.IngestCharacterRecord(characterRecord);
 
                     var inventoryComponentRef = (ObjectReference?)characterRecord.Properties.Get<ObjectProperty>("MyInventoryComponent")?.Value;
-                    if (inventoryComponentRef != null)
+                    if (inventoryComponentRef != null && inventoryRecords.ContainsKey(inventoryComponentRef.ObjectId))
                     {
                         var inventoryRecord = inventoryRecords[inventoryComponentRef.ObjectId];
 
@@ -238,7 +195,7 @@ public class AsaSaveGame
                         {
                             foreach (ObjectReference itemReference in inventoryItems)
                             {
-                                if (itemReference.ObjectId == Guid.Empty)
+                                if (itemReference.ObjectId == Guid.Empty || !itemRecords.ContainsKey(itemReference.ObjectId))
                                 {
                                     continue; //skip empty slots
                                 }
@@ -304,7 +261,7 @@ public class AsaSaveGame
                 }
 
                 var inventoryComponentRef = (ObjectReference?)r.Value.Properties.Get<ObjectProperty>("MyInventoryComponent")?.Value;
-                if (inventoryComponentRef != null)
+                if (inventoryComponentRef != null && inventoryRecords.ContainsKey(inventoryComponentRef.ObjectId))
                 {
                     var inventoryRecord = inventoryRecords[inventoryComponentRef.ObjectId];
                     Inventory inventory = new Inventory();
@@ -317,7 +274,7 @@ public class AsaSaveGame
                     {
                         foreach (ObjectReference itemReference in inventoryItems)
                         {
-                            if (itemReference.ObjectId == Guid.Empty)
+                            if (itemReference.ObjectId == Guid.Empty || !itemRecords.ContainsKey(itemReference.ObjectId))
                             {
                                 continue; //skip empty slots
                             }
@@ -333,7 +290,7 @@ public class AsaSaveGame
                     {
                         foreach (ObjectReference itemReference in equippedSlots)
                         {
-                            if (itemReference.ObjectId == Guid.Empty)
+                            if (itemReference.ObjectId == Guid.Empty || !itemRecords.ContainsKey(itemReference.ObjectId))
                             {
                                 continue; //skip empty slots
                             }
@@ -350,7 +307,7 @@ public class AsaSaveGame
                     {
                         foreach (ObjectReference itemReference in itemSlots)
                         {
-                            if (itemReference.ObjectId == Guid.Empty)
+                            if (itemReference.ObjectId == Guid.Empty || !itemRecords.ContainsKey(itemReference.ObjectId))
                             {
                                 continue; //skip empty slots
                             }
@@ -384,7 +341,7 @@ public class AsaSaveGame
                 var droppedItem = DroppedItem.Create(itemRecord, itemLocation);
 
                 var myObjectRef = (ObjectReference?)r.Value.Properties.Get<ObjectProperty>("MyItem")?.Value;
-                if (myObjectRef != null)
+                if (myObjectRef != null && itemRecords.ContainsKey(myObjectRef.ObjectId))
                 {
                     var referencedObject = itemRecords[myObjectRef.ObjectId];
                     var referencedItem = Item.Create(referencedObject);

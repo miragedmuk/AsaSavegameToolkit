@@ -149,8 +149,7 @@ public class AsaSaveReader : IDisposable
             }
 
             var parsedGameRecords = new ConcurrentDictionary<Guid, GameObjectRecord>();
-            var parsedNameLookup = new ConcurrentDictionary<string, Guid>();
-
+            var parsedInventoryOwners = new ConcurrentDictionary<Guid, GameObjectRecord>();
 
             if (_settings.ReadGameObjects || _settings.ReadCryoObjects)
             {
@@ -163,17 +162,24 @@ public class AsaSaveReader : IDisposable
                     try
                     {
                         var gameRecord = ParseGameRecord(objectId, objectBytes, saveHeader);
+                        var inventoryComponentRef = gameRecord.Properties.Get<ObjectProperty>("MyInventoryComponent")?.Value?.ObjectId??Guid.Empty;
+
+                        if (inventoryComponentRef!= Guid.Empty)
+                        {
+                            parsedInventoryOwners.AddOrUpdate(inventoryComponentRef, gameRecord, (_, _) =>
+                            {
+                                _logger.LogWarning("Replacing inventory component object with guid {Guid}. Returning the new object.", objectId);
+                                return gameRecord;
+                            });
+                        }
+
+
                         parsedGameRecords.AddOrUpdate(objectId, gameRecord, (_, _) =>
                         {
                             _logger.LogWarning("Replacing game object with guid {Guid}. This may indicate duplicate entries in the database or a collision. Returning the new object.", objectId);
                             return gameRecord;
                         });
 
-                        parsedNameLookup.AddOrUpdate(gameRecord.Name, objectId, (_, _) =>
-                        {
-                            _logger.LogWarning("Duplicate game object name {Name} found for guid {Guid}. This may indicate duplicate entries in the database or a collision. Returning the first object.", gameRecord.Name, objectId);
-                            return objectId;
-                        });
                     }
                     catch (Exception ex)
                     {
@@ -204,14 +210,14 @@ public class AsaSaveReader : IDisposable
 
                     if (cryoRecordSets.Count == 0)
                     {
-                        _logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} does not contain any data", cryopod.Names[0], cryopod.Uuid);
+                        _logger.LogWarning("DataBytes with name {CryopodName} and UUID {CryopodUuid} does not contain any data", cryopod.Names[0], cryopod.Uuid);
                         continue;
                     }
 
                     var creatureRecord = cryoRecordSets.SelectMany(g => g).FirstOrDefault(r => r.IsCreature());
                     if (creatureRecord == null)
                     {
-                        _logger.LogWarning("Cryopod with name {CryopodName} and UUID {CryopodUuid} does not contain any creature data", cryopod.Names[0], cryopod.Uuid);
+                        _logger.LogWarning("DataBytes with name {CryopodName} and UUID {CryopodUuid} does not contain any creature data", cryopod.Names[0], cryopod.Uuid);
                         continue;
                     }
 
@@ -222,10 +228,10 @@ public class AsaSaveReader : IDisposable
                         var inventoryRecord = parsedGameRecords[containerProperty.Value.ObjectId];
                         if (inventoryRecord.Names.Count > 1)
                         {
-                            var parentComponentUuid = parsedNameLookup[inventoryRecord.Names[1]];
-                            var parentComponent = parsedGameRecords[parentComponentUuid];
-                            if (parentComponent != null)
+
+                            if (parsedInventoryOwners.ContainsKey(inventoryRecord.Uuid))
                             {
+                                var parentComponent = parsedInventoryOwners[inventoryRecord.Uuid];
                                 var containerId = parentComponent.Uuid;                               
 
                                 creatureRecord.Properties.Remove(containerProperty);

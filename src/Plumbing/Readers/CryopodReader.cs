@@ -471,7 +471,7 @@ public sealed class CryopodReader : IDisposable
 
                 archive.Position = posBackup;
 
-                var objectId = props.Any(p => p.Tag.Name.ToString() == "bServerInitializedDino") ? meta.Uuid : Guid.NewGuid(); //re-assign uniqueid for non-dinos
+                var objectId = Guid.NewGuid(); //re-assign new uniqueid to prevent collisions
 
                 string[] rootNames = new string[1];
                 rootNames[0] = meta.Names[0];
@@ -682,7 +682,7 @@ public sealed class CryopodReader : IDisposable
 
                 archive.Position = posBackup;
 
-                var objectId = props.HasAny("bServerInitializedDino") ? meta.Uuid : Guid.NewGuid(); //re-assign uniqueid for non-dinos
+                var objectId =  Guid.NewGuid(); //re-assign uniqueid 
 
                 string[] rootNames = new string[1];
                 rootNames[0] = meta.Names[0];
